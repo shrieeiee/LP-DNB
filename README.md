@@ -190,7 +190,7 @@ Each style puts 16 of these on its two effect rows.
 Even with no effects held, the top half is a live level meter per track. Kicks send red ripples up from
 the bottom, snares and claps drop amber ones from the top, chords close in from the sides, toms and
 congas roll in from the corners, and every pad you touch sends a ripple. Switching style sweeps the
-style's colour across the grid. When stopped, it idles with a slow plasma.
+style's colour across the grid. When stopped, a slow wave in the style's colour drifts across, with the odd twinkle.
 
 ## Adding your own
 

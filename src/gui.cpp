@@ -125,6 +125,16 @@ void statusDot(ImU32 col, float s) {
     ImGui::SameLine();
 }
 
+// Width available in a scrolling panel, *as if the scrollbar were always showing*.
+// Laying out against this keeps the layout identical whether or not the scrollbar
+// is visible. Otherwise taller rows can bring in the scrollbar, which narrows the
+// rows, which removes the scrollbar... and the whole panel shakes every frame.
+float stableAvailX() {
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float full = ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - st.WindowPadding.x - st.ScrollbarSize;
+    return std::max(50.f, full - ImGui::GetCursorScreenPos().x);
+}
+
 ImVec4 styleAccent(const Style& st) { return ImGui::ColorConvertU32ToFloat4(ledColor(st.led)); }
 
 // ------------------------------------------------------------ sections --
@@ -462,7 +472,7 @@ void drawSequencer(App& app, GuiState& gs) {
     // Pattern chips: every pattern of this style; yours are amber.
     {
         const int styleIdx = p / kMaxSlots, count = sh.slotCount[styleIdx].load(), queued = sh.queued.load();
-        const float maxX = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        const float maxX = ImGui::GetCursorScreenPos().x + stableAvailX();
         for (int k = 0; k < count; ++k) {
             const int gi = styleIdx * kMaxSlots + k;
             char lbl[128];
@@ -484,7 +494,7 @@ void drawSequencer(App& app, GuiState& gs) {
     ImGui::TextColored(ImVec4(0.42f, 0.42f, 0.47f, 1), "Click a step to toggle it. Right-click for accents, rolls, notes, slides and holds.");
 
     const float muteW = 36 * s, nameW = 128 * s, groupGap = 10 * s, cellGap = 4 * s;
-    const float avail = ImGui::GetContentRegionAvail().x;
+    const float avail = stableAvailX();
     const float cell = std::max(14 * s, (avail - muteW - nameW - 16 * s - groupGap * 3 - cellGap * 15) / 16.f);
     const float rowH = std::max(26 * s, std::min(cell, 38 * s));
     const float cr = std::min(cell, rowH) * 0.34f;  // step corner radius
@@ -685,7 +695,7 @@ void drawEffects(App& app, GuiState& gs) {
     ImGui::TextColored(kHint, "Hold a button (or its key) to play the effect. Let go to stop. Each style has its own set.");
     ImGui::Spacing();
     const char* keys = "QWERTYUIASDFGHJK";
-    const float avail = ImGui::GetContentRegionAvail().x;
+    const float avail = stableAvailX();
     const float gap = 6 * s;
     const float w = (avail - gap * 7) / 8.f;
     const float h = std::min(w * 0.85f, 86 * s);
@@ -722,7 +732,7 @@ void drawStyles(App& app, GuiState& gs) {
     const int cur = app.shared().pattern.load() / kMaxSlots;
     ImGui::TextColored(kHint, "Each style has its own sounds, key, swing, effects and four patterns. Switching happens on the next bar.");
     ImGui::Spacing();
-    const float avail = ImGui::GetContentRegionAvail().x;
+    const float avail = stableAvailX();
     const int cols = avail > 900 * s ? 4 : 3;
     const float gap = 8 * s;
     const float w = (avail - gap * (cols - 1)) / cols, h = 92 * s;
@@ -777,7 +787,7 @@ void drawPiano(App& app, GuiState& gs, int lo, int hi, float height) {
     auto isBlack = [](int n) { int k = n % 12; return k == 1 || k == 3 || k == 6 || k == 8 || k == 10; };
     int whites = 0;
     for (int n = lo; n <= hi; ++n) whites += isBlack(n) ? 0 : 1;
-    const float W = ImGui::GetContentRegionAvail().x;
+    const float W = stableAvailX();
     const float ww = W / whites, bw = ww * 0.62f, bh = height * 0.6f;
     const ImVec2 o = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton("piano", ImVec2(W, height));
@@ -877,7 +887,7 @@ void drawInstrument(App& app, GuiState& gs) {
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10 * s, 7 * s));
     const auto& pats = leadPatches();
     std::string group;
-    const float indent = 100 * s, bw = 168 * s, maxX = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    const float indent = 100 * s, bw = 168 * s, maxX = ImGui::GetCursorScreenPos().x + stableAvailX();
     for (size_t i = 0; i < pats.size(); ++i) {
         const LeadPatch& lp = pats[i];
         if (lp.group != group) {
@@ -1106,7 +1116,8 @@ void drawGui(App& app, GuiState& gs, double now) {
     const float avail = ImGui::GetContentRegionAvail().x;
     const float leftW = std::clamp(avail * 0.40f, 360 * s, 600 * s);
 
-    ImGui::BeginChild("launchpad", ImVec2(leftW, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::BeginChild("launchpad", ImVec2(leftW, 0), ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     drawLaunchpad(app, gs, leftW - 2 * ImGui::GetStyle().WindowPadding.x - 10 * s, now);
     ImGui::EndChild();
     ImGui::SameLine();

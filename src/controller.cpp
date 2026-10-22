@@ -574,7 +574,9 @@ void Controller::buildCanvas(double now, float dt, Color cv[8][4]) {
             active = f;
         }
 
-    // 1) base layer: level meter per track while playing, plasma while stopped
+    // 1) base layer: level meter per track while playing, a calm wave while stopped
+    Color idleColor = ledToColor(styleOf(sh_.pattern.load()).led);
+    if (idleColor.r + idleColor.g < 1.f) idleColor = GREEN;
     for (int x = 0; x < 8; ++x)
         for (int y = 0; y < 4; ++y) {
             Color c = OFF;
@@ -584,14 +586,23 @@ void Controller::buildCanvas(double now, float dt, Color cv[8][4]) {
                 float f = std::clamp(env_[x] * 4.2f - l, 0.f, 1.f);
                 c = scale(lv[l], f);
             } else {
+                // Idle: a slow, dim wave in the style's colour. Kept slow and low so the
+                // Launchpad's 4 brightness steps change gently instead of strobing.
                 const float t = static_cast<float>(now);
-                float v = std::sin(x * 0.55f + t * 1.1f) + std::sin(y * 0.8f - t * 0.9f) +
-                          std::sin((x + y) * 0.45f + t * 0.6f) +
-                          std::sin(std::hypot(x - 3.5f, y - 1.5f) * 0.9f - t * 1.4f);
-                c = {1.f + std::sin(v * 1.4f), 1.f + std::sin(v * 1.4f + 2.1f)};
+                const float v = 0.5f + 0.5f * std::sin((x + y * 1.3f) * 0.55f - t * 0.9f);
+                c = scale(idleColor, 0.12f + 0.42f * v);
             }
             cv[x][y] = c;
         }
+    if (!playing) {
+        // Now and then one pad twinkles and fades out over a second.
+        const double period = 0.9;
+        const uint32_t n = static_cast<uint32_t>(now / period);
+        const float age = static_cast<float>(now - n * period);
+        const uint32_t h = hash32(n * 2654435761u);
+        const int tx = static_cast<int>(h % 8), ty = static_cast<int>((h >> 8) % 4);
+        maxb(cv[tx][ty], scale(AMBER, std::max(0.f, 1.f - age / 1.0f)));
+    }
 
     // 2) the most recently pressed effect takes over the canvas
     if (active >= 0) drawFx(active, now - fxPress_[active], now, dt, cv);
