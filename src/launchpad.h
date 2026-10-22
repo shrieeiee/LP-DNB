@@ -13,12 +13,14 @@
 #pragma once
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 class RtMidiIn;
@@ -52,6 +54,9 @@ public:
     void forceRescan() { nextScan_ = 0.0; }
 
     std::vector<MidiMsg> takeMessages();
+    // Hands the lights to the light thread, which sends the newest frame to the
+    // Launchpad. Never waits for the Launchpad, so a slow or stalled driver can't
+    // freeze the window (it just skips frames).
     void pushFrame(const Frame& f);
 
     // --- Launchpad selection. Empty name = auto-detect anything called "Launchpad".
@@ -97,7 +102,8 @@ private:
     void scan(double now);
     void openLaunchpad(const std::string& in, const std::string& out);
     void closeLaunchpad(const char* why);
-    void send(unsigned char a, unsigned char b, unsigned char c);
+    void send(unsigned char a, unsigned char b, unsigned char c);  // hold outMu_
+    void lightLoop();
     bool isLaunchpadName(const std::string& n) const;
 
     std::unique_ptr<RtMidiIn> scanIn_;
@@ -112,9 +118,18 @@ private:
     std::atomic<bool> lpError_{false};
     std::atomic<double> lpActivity_{-10.0};
     std::set<std::string> failedOnce_;
+    // The Launchpad output and what's on its LEDs: used by the light thread, and by
+    // the main thread when the Launchpad is opened or closed. outMu_ guards them.
+    std::mutex outMu_;
     int updateBuf_ = 0;
     Frame shown_{};
     bool haveShown_ = false;
+    // The newest frame waiting for the light thread.
+    std::mutex lightMu_;
+    std::condition_variable lightCv_;
+    Frame pending_{};
+    bool havePending_ = false, lightQuit_ = false;
+    std::thread lightThread_;
 
     std::map<std::string, std::unique_ptr<KbPort>> kbs_;
     std::set<std::string> kbDisabled_;

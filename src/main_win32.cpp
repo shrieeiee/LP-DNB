@@ -11,6 +11,8 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <ctime>
 #include <filesystem>
@@ -29,6 +31,9 @@
 #include "imgui_impl_win32.h"
 #include "log.h"
 #include "storage.h"
+#ifndef LPDNB_COMMIT
+#define LPDNB_COMMIT "dev"
+#endif
 #ifdef LP_TENORI
 #include "tenori.h"
 #include "tenori_gui.h"
@@ -98,29 +103,113 @@ void cleanupDevice() {
 }
 
 // Freeze watchdog: if the window stops updating for a few seconds, write down
-// what it was doing to lp-dnb-freeze-log.txt next to the save file, so a hang
-// that only happens after a long time can be tracked down.
+// what it was doing to lp-dnb-freeze-log.txt (lp-tenori-freeze-log.txt) next to
+// the save file: the step it was on, whether the sound was still running, a few
+// samples of the window thread's call stack (as module+offset, so they can be
+// matched to the source), and how long it lasted once it recovers.
 std::atomic<double> gHeartbeat{0.0};
 std::atomic<bool> gWatchQuit{false};
+HANDLE gMainThread = nullptr;            // the window thread, for the stack samples
+const dnb::Shared* gShared = nullptr;    // to tell whether the audio is still running
+
+#ifdef LP_TENORI
+const wchar_t* kFreezeLog = L"lp-tenori-freeze-log.txt";
+const char* kProgram = "lp-tenori";
+#else
+const wchar_t* kFreezeLog = L"lp-dnb-freeze-log.txt";
+const char* kProgram = "lp-dnb";
+#endif
+
+// Return addresses of the window thread, top first. Nothing here allocates or
+// takes a lock while the thread is suspended (it might be holding one).
+int sampleMainStack(DWORD64* out, int max) {
+    if (!gMainThread || SuspendThread(gMainThread) == static_cast<DWORD>(-1)) return 0;
+    int n = 0;
+    CONTEXT ctx{};
+    ctx.ContextFlags = CONTEXT_FULL;
+    if (GetThreadContext(gMainThread, &ctx)) {
+        while (n < max && ctx.Rip) {
+            out[n++] = ctx.Rip;
+            DWORD64 base = 0;
+            PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &base, nullptr);
+            if (fn) {
+                PVOID handlerData = nullptr;
+                DWORD64 frame = 0;
+                RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, ctx.Rip, fn, &ctx, &handlerData, &frame, nullptr);
+            } else {  // leaf function: the return address is on top of the stack
+                if (!ctx.Rsp) break;
+                ctx.Rip = *reinterpret_cast<DWORD64*>(ctx.Rsp);
+                ctx.Rsp += 8;
+            }
+        }
+    }
+    ResumeThread(gMainThread);
+    return n;
+}
+
+void writeStack(FILE* f, const DWORD64* a, int n) {
+    for (int i = 0; i < n; ++i) {
+        HMODULE mod = nullptr;
+        char name[MAX_PATH] = "?";
+        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               reinterpret_cast<LPCWSTR>(a[i]), &mod) && mod) {
+            char full[MAX_PATH];
+            if (GetModuleFileNameA(mod, full, MAX_PATH)) {
+                const char* b = std::strrchr(full, '\\');
+                std::snprintf(name, sizeof name, "%s", b ? b + 1 : full);
+            }
+        }
+        std::fprintf(f, "    %s+0x%llx\n", name, static_cast<unsigned long long>(a[i] - reinterpret_cast<DWORD64>(mod)));
+    }
+}
 
 void watchdog() {
-    bool reported = false;
+    bool frozen = false;
+    double frozeAt = 0.0;
     while (!gWatchQuit.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        const double stalled = dnb::monotonicSec() - gHeartbeat.load();
-        if (stalled < 4.0) { reported = false; continue; }
-        if (reported) continue;
-        reported = true;
+        const double now = dnb::monotonicSec();
+        const double stalled = now - gHeartbeat.load();
+        if (stalled < 4.0) {
+            if (frozen) {  // it came back
+                frozen = false;
+                try {
+                    const auto path = std::filesystem::u8path(dnb::dataFilePath()).parent_path() / kFreezeLog;
+                    if (FILE* f = _wfopen(path.wstring().c_str(), L"a")) {
+                        std::fprintf(f, "%s  window started updating again after %.0f s\n\n", dnb::timeStamp().c_str(), now - frozeAt);
+                        std::fclose(f);
+                    }
+                } catch (...) {
+                }
+            }
+            continue;
+        }
+        if (frozen) continue;
+        frozen = true;
+        frozeAt = gHeartbeat.load();
+        // Three samples a third of a second apart: the same place every time means
+        // it's waiting on something; different places means it's busy looping.
+        DWORD64 st[3][40];
+        int sn[3];
+        const char* phase[3];
+        for (int k = 0; k < 3; ++k) {
+            phase[k] = dnb::uiPhase().load();
+            sn[k] = sampleMainStack(st[k], 40);
+            if (k < 2) std::this_thread::sleep_for(std::chrono::milliseconds(330));
+        }
+        const bool audio = gShared && dnb::monotonicSec() - gShared->clockTime.load() < 1.0;
         try {
-#ifdef LP_TENORI
-            const auto path = std::filesystem::u8path(dnb::dataFilePath()).parent_path() / "lp-tenori-freeze-log.txt";
-#else
-            const auto path = std::filesystem::u8path(dnb::dataFilePath()).parent_path() / "lp-dnb-freeze-log.txt";
-#endif
+            const auto path = std::filesystem::u8path(dnb::dataFilePath()).parent_path() / kFreezeLog;
             std::filesystem::create_directories(path.parent_path());
             if (FILE* f = _wfopen(path.wstring().c_str(), L"a")) {
-                std::fprintf(f, "%s  window stopped updating while: %s (running %.0f s)\n", dnb::timeStamp().c_str(),
-                             dnb::uiPhase().load(), dnb::monotonicSec());
+                std::fprintf(f, "%s  %s %s (%s): window stopped updating while: %s (running %.0f s)\n", dnb::timeStamp().c_str(),
+                             kProgram, dnb::kVersion, LPDNB_COMMIT, phase[0], dnb::monotonicSec());
+                std::fprintf(f, "  sound engine %s, %s\n", audio ? "still running" : "not running",
+                             gShared && gShared->playing.load() ? "lp-dnb sequencer playing" : "lp-dnb sequencer stopped");
+                for (int k = 0; k < 3; ++k) {
+                    std::fprintf(f, "  window thread, sample %d (%s):\n", k + 1, phase[k]);
+                    writeStack(f, st[k], sn[k]);
+                }
                 std::fclose(f);
             }
         } catch (...) {
@@ -203,6 +292,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
     dnb::Log::get().setEcho(false);  // no console to print to
     timeBeginPeriod(1);              // 1 ms sleeps: smooth frame pacing and MIDI clock
     gHeartbeat = dnb::monotonicSec();
+    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &gMainThread,
+                    THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, 0);
     std::thread watch(watchdog);
     ImGui_ImplWin32_EnableDpiAwareness();
     const float dpi = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
@@ -264,6 +355,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
     ImGui_ImplDX11_Init(gDevice, gContext);
 
     dnb::App app;
+    gShared = &app.shared();
 #ifdef LP_TENORI
     app.setAutosave(false);  // leave lp-dnb's own save file alone
     dnb::Tenori tenori(app.shared());
@@ -336,6 +428,14 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
             ImGui_ImplDX11_Init(gDevice, gContext);
         }
         dnb::uiPhase() = "idle";
+        // LPDNB_TEST_FREEZE set: stall once, 10 s in, to check the freeze log works.
+        static const bool testFreeze = std::getenv("LPDNB_TEST_FREEZE") != nullptr;
+        static bool testDone = false;
+        if (testFreeze && !testDone && now > 10.0) {
+            testDone = true;
+            dnb::uiPhase() = "test freeze (LPDNB_TEST_FREEZE)";
+            Sleep(6000);
+        }
         const double target = frameStart + 1.0 / 60.0;
         double t = dnb::monotonicSec();
         if (t < target) Sleep(static_cast<DWORD>((target - t) * 1000.0));
@@ -350,6 +450,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
 #endif
     gWatchQuit = true;
     watch.join();
+    gShared = nullptr;
     timeEndPeriod(1);
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();

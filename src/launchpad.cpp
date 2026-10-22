@@ -71,9 +71,16 @@ MidiHub::MidiHub() {
     } catch (const RtMidiError& e) {
         logf("MIDI unavailable: %s", e.getMessage().c_str());
     }
+    lightThread_ = std::thread([this] { lightLoop(); });
 }
 
 MidiHub::~MidiHub() {
+    {
+        std::lock_guard<std::mutex> lk(lightMu_);
+        lightQuit_ = true;
+    }
+    lightCv_.notify_one();
+    if (lightThread_.joinable()) lightThread_.join();
     closeLaunchpad(nullptr);
     for (auto& kv : kbs_) {
         if (kv.second->in) {
@@ -186,6 +193,7 @@ void MidiHub::scan(double now) {
 }
 
 void MidiHub::openLaunchpad(const std::string& inName, const std::string& outName) {
+    std::lock_guard<std::mutex> lk(outMu_);
     const std::string key = inName + "|" + outName;
     try {
         lpError_ = false;
@@ -224,6 +232,7 @@ void MidiHub::openLaunchpad(const std::string& inName, const std::string& outNam
 }
 
 void MidiHub::closeLaunchpad(const char* why) {
+    std::lock_guard<std::mutex> lk(outMu_);
     if (!lpIn_ && !lpOut_) return;
     const bool gone = why && std::string(why) == "unplugged";
     if (lpOut_ && !lpError_.load() && !gone) send(0xB0, 0x00, 0x00);  // LEDs off, single buffering again
@@ -347,20 +356,40 @@ void MidiHub::send(unsigned char a, unsigned char b, unsigned char c) {
 
 void MidiHub::pushFrame(const Frame& f) {
     if (!launchpadConnected()) return;
-    if (haveShown_ && f == shown_) return;
-    // Flags = 0 while double buffering: write only the hidden (update) buffer.
-    auto vel = [](uint8_t v) -> unsigned char {
-        unsigned r = v & 3, g = (v >> 4) & 3;
-        return static_cast<unsigned char>(g * 16 + r);
-    };
-    for (int i = 0; i < 80; i += 2) send(0x92, vel(f[i]), vel(f[i + 1]));
-    // Show what we just wrote; start updating the other buffer. This CC also
-    // resets the rapid-update pointer for the next frame.
-    const int shownBuf = updateBuf_;
-    updateBuf_ ^= 1;
-    send(0xB0, 0x00, static_cast<unsigned char>(0x20 | (updateBuf_ << 2) | shownBuf));
-    shown_ = f;
-    haveShown_ = true;
+    {
+        std::lock_guard<std::mutex> lk(lightMu_);
+        pending_ = f;
+        havePending_ = true;
+    }
+    lightCv_.notify_one();
+}
+
+void MidiHub::lightLoop() {
+    for (;;) {
+        Frame f;
+        {
+            std::unique_lock<std::mutex> lk(lightMu_);
+            lightCv_.wait(lk, [this] { return havePending_ || lightQuit_; });
+            if (lightQuit_) return;
+            f = pending_;
+            havePending_ = false;
+        }
+        std::lock_guard<std::mutex> lk(outMu_);
+        if (!lpOut_ || (haveShown_ && f == shown_)) continue;
+        // Flags = 0 while double buffering: write only the hidden (update) buffer.
+        auto vel = [](uint8_t v) -> unsigned char {
+            unsigned r = v & 3, g = (v >> 4) & 3;
+            return static_cast<unsigned char>(g * 16 + r);
+        };
+        for (int i = 0; i < 80; i += 2) send(0x92, vel(f[i]), vel(f[i + 1]));
+        // Show what we just wrote; start updating the other buffer. This CC also
+        // resets the rapid-update pointer for the next frame.
+        const int shownBuf = updateBuf_;
+        updateBuf_ ^= 1;
+        send(0xB0, 0x00, static_cast<unsigned char>(0x20 | (updateBuf_ << 2) | shownBuf));
+        shown_ = f;
+        haveShown_ = true;
+    }
 }
 
 }  // namespace dnb

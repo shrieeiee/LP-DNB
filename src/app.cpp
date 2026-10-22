@@ -900,12 +900,14 @@ void App::tick(double now) {
         if (autosave_) saveNow();
     }
 
-    uiPhase() = "updating Launchpad lights";
+    uiPhase() = surface_ ? "running the sequencer" : "updating the controller";
     if (surface_) surface_->update(now);
     else ctl_->update(now);
     if (now >= nextLed_) {
+        uiPhase() = "working out the Launchpad lights";
         if (surface_) surface_->render(now, frame_);
         else ctl_->render(now, frame_);
+        uiPhase() = "sending lights to the Launchpad";
         midi_->pushFrame(frame_);
         nextLed_ += 1.0 / 30.0;
         if (nextLed_ < now) nextLed_ = now + 1.0 / 30.0;
