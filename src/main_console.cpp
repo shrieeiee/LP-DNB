@@ -66,11 +66,12 @@ int runDemo(const std::string& path, bool all) {
     const int sr = 48000;
     auto sh = std::make_unique<Shared>();
     loadAllPresets(*sh);
+    leadPatches();
     Engine engine(*sh, static_cast<float>(sr));
 
     std::vector<int> segs;
     for (int s = 0; s < styleCount(); ++s)
-        for (int k = 0; k < (all ? kSlots : 2); ++k) segs.push_back(s * kSlots + k);
+        for (int k = 0; k < (all ? kFactorySlots : 2); ++k) segs.push_back(s * kMaxSlots + k);
     const int barsPerSeg = 2;
 
     struct Stat { double peak = 0, sum = 0; size_t n = 0; bool bad = false; };
@@ -135,7 +136,7 @@ int runDemo(const std::string& path, bool all) {
     for (size_t i = 0; i < segs.size(); ++i) {
         const Style& st = styleOf(segs[i]);
         const Stat& s = stats[i];
-        std::printf("%-12s %-18s %6.3f %6.3f%s\n", st.name.c_str(), st.patterns[static_cast<size_t>(segs[i] % kSlots)].name.c_str(),
+        std::printf("%-12s %-18s %6.3f %6.3f%s\n", st.name.c_str(), st.patterns[static_cast<size_t>(segs[i] % kMaxSlots)].name.c_str(),
                     s.peak, s.n ? std::sqrt(s.sum / s.n) : 0.0, s.bad ? "  ** NON-FINITE **" : "");
         badTotal += s.bad ? 1 : 0;
     }

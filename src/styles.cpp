@@ -1,5 +1,7 @@
 #include "styles.h"
 
+#include <algorithm>
+
 #include <cstdio>
 
 #include "log.h"
@@ -528,38 +530,194 @@ std::string chordNumeral(const Style& s, int degree, int notes) {
     return r;
 }
 
-void loadPreset(Shared& sh, int pattern) {
-    const Style& st = styleOf(pattern);
-    const PatternDef& pd = st.patterns[static_cast<size_t>(pattern % kSlots)];
-    for (int t = 0; t < kTracks; ++t) {
-        const std::string& row = pd.rows[static_cast<size_t>(t)];
-        for (int s = 0; s < kSteps; ++s) {
-            const char c = s < static_cast<int>(row.size()) ? row[static_cast<size_t>(s)] : '.';
-            uint8_t code = STEP_OFF;
-            int8_t note = 0;
-            if (t >= T_BASS) {
-                if (c >= '0' && c <= '9') { code = STEP_ON; note = static_cast<int8_t>(c - '0'); }
-                else if (c >= 'A' && c <= 'J') { code = STEP_ACCENT; note = static_cast<int8_t>(c - 'A'); }
-                else if (c >= 'a' && c <= 'j') { code = STEP_ON | STEP_SLIDE; note = static_cast<int8_t>(c - 'a'); }
-                else if (c == '-') { code = STEP_TIE; }
-            } else {
-                switch (c) {
-                    case 'x': code = STEP_ON; break;
-                    case 'X': code = STEP_ACCENT; break;
-                    case 'o': code = STEP_SOFT; break;
-                    case 'r': code = STEP_ROLL2; break;
-                    case 't': code = STEP_ROLL3; break;
-                    default: break;
-                }
+void parseRow(const std::string& row, bool melodic, uint8_t codes[kSteps], int8_t notes[kSteps]) {
+    for (int s = 0; s < kSteps; ++s) {
+        const char c = s < static_cast<int>(row.size()) ? row[static_cast<size_t>(s)] : '.';
+        uint8_t code = STEP_OFF;
+        int8_t note = 0;
+        if (melodic) {
+            if (c >= '0' && c <= '9') { code = STEP_ON; note = static_cast<int8_t>(c - '0'); }
+            else if (c >= 'A' && c <= 'J') { code = STEP_ACCENT; note = static_cast<int8_t>(c - 'A'); }
+            else if (c >= 'a' && c <= 'j') { code = STEP_ON | STEP_SLIDE; note = static_cast<int8_t>(c - 'a'); }
+            else if (c == '-') { code = STEP_TIE; }
+        } else {
+            switch (c) {
+                case 'x': code = STEP_ON; break;
+                case 'X': code = STEP_ACCENT; break;
+                case 'o': code = STEP_SOFT; break;
+                case 'r': code = STEP_ROLL2; break;
+                case 't': code = STEP_ROLL3; break;
+                default: break;
             }
-            sh.on[pattern][t][s].store(code);
-            sh.note[pattern][t][s].store(note);
         }
+        codes[s] = code;
+        notes[s] = note;
     }
 }
 
+std::string encodeRow(const Shared& sh, int p, int t) {
+    std::string out(kSteps, '.');
+    const bool melodic = t >= T_BASS;
+    for (int s = 0; s < kSteps; ++s) {
+        const uint8_t v = sh.on[p][t][s].load();
+        const int k = stepKind(v);
+        const int n = std::clamp<int>(sh.note[p][t][s].load(), 0, 9);
+        char c = '.';
+        if (melodic) {
+            if (k == STEP_TIE) c = '-';
+            else if (stepSounds(v)) c = static_cast<char>((v & STEP_SLIDE) ? 'a' + n : (k == STEP_ACCENT ? 'A' + n : '0' + n));
+        } else {
+            switch (k) {
+                case STEP_ON: c = 'x'; break;
+                case STEP_ACCENT: c = 'X'; break;
+                case STEP_SOFT: c = 'o'; break;
+                case STEP_ROLL2: c = 'r'; break;
+                case STEP_ROLL3: c = 't'; break;
+                default: break;
+            }
+        }
+        out[static_cast<size_t>(s)] = c;
+    }
+    return out;
+}
+
+void setRow(Shared& sh, int p, int t, const std::string& row) {
+    uint8_t codes[kSteps];
+    int8_t notes[kSteps];
+    parseRow(row, t >= T_BASS, codes, notes);
+    for (int s = 0; s < kSteps; ++s) {
+        sh.on[p][t][s].store(codes[s]);
+        sh.note[p][t][s].store(notes[s]);
+    }
+}
+
+bool factoryUnchanged(const Shared& sh, int p) {
+    const int slot = p % kMaxSlots;
+    if (slot >= kFactorySlots) return false;
+    const PatternDef& pd = styleOf(p).patterns[static_cast<size_t>(slot)];
+    for (int t = 0; t < kTracks; ++t) {
+        uint8_t codes[kSteps];
+        int8_t notes[kSteps];
+        parseRow(pd.rows[static_cast<size_t>(t)], t >= T_BASS, codes, notes);
+        for (int s = 0; s < kSteps; ++s) {
+            if (sh.on[p][t][s].load() != codes[s]) return false;
+            if (stepSounds(codes[s]) && t >= T_BASS && sh.note[p][t][s].load() != notes[s]) return false;
+        }
+    }
+    return true;
+}
+
+void copyPattern(Shared& sh, int from, int to) {
+    for (int t = 0; t < kTracks; ++t)
+        for (int s = 0; s < kSteps; ++s) {
+            sh.on[to][t][s].store(sh.on[from][t][s].load());
+            sh.note[to][t][s].store(sh.note[from][t][s].load());
+        }
+}
+
+void clearPattern(Shared& sh, int p) {
+    for (int t = 0; t < kTracks; ++t)
+        for (int s = 0; s < kSteps; ++s) {
+            sh.on[p][t][s].store(STEP_OFF);
+            sh.note[p][t][s].store(0);
+        }
+}
+
+void loadPreset(Shared& sh, int pattern) {
+    const int slot = pattern % kMaxSlots;
+    if (slot >= kFactorySlots) return;
+    const PatternDef& pd = styleOf(pattern).patterns[static_cast<size_t>(slot)];
+    for (int t = 0; t < kTracks; ++t) setRow(sh, pattern, t, pd.rows[static_cast<size_t>(t)]);
+    sh.patternName[pattern] = pd.name;
+}
+
 void loadAllPresets(Shared& sh) {
-    for (int p = 0; p < styleCount() * kSlots && p < kMaxPatterns; ++p) loadPreset(sh, p);
+    for (int st = 0; st < styleCount() && st < kMaxStyles; ++st) {
+        for (int k = 0; k < kFactorySlots; ++k) loadPreset(sh, st * kMaxSlots + k);
+        sh.slotCount[st].store(kFactorySlots);
+    }
+}
+
+// ------------------------------------------------------------ lead patches --
+
+namespace {
+std::vector<LeadPatch> buildLeads() {
+    std::vector<LeadPatch> v;
+    auto poly = [&](const char* name, const char* group, ChordOsc osc, float attack, float decay, float sustain,
+                    float release, float cutoff, float envAmt, float envDecay, float res, float detune, float gain,
+                    float verb, float delay) {
+        LeadPatch p;
+        p.name = name;
+        p.group = group;
+        p.kind = LeadPatch::POLY;
+        p.poly.osc = osc;
+        p.poly.notes = 1;
+        p.poly.attack = attack; p.poly.decay = decay; p.poly.sustain = sustain; p.poly.release = release;
+        p.poly.cutoff = cutoff; p.poly.envAmt = envAmt; p.poly.envDecay = envDecay; p.poly.res = res;
+        p.poly.detune = detune; p.poly.gain = 1.f;
+        p.gain = gain; p.verb = verb; p.delay = delay;
+        v.push_back(p);
+    };
+    //    name               group     osc               att    dec   sus   rel   cut    env    envD  res   det   gain  verb  delay
+    poly("Supersaw lead",   "Leads",  ChordOsc::Saw,     0.005f, 1.5f, 0.75f, 5.f, 3200,  3500,  5,    1.2f, 0.8f, 0.55f, 0.25f, 0.2f);
+    poly("Square lead",     "Leads",  ChordOsc::Square,  0.005f, 2.f,  0.7f,  6.f, 2400,  2500,  6,    1.4f, 0.f,  0.45f, 0.2f,  0.2f);
+    poly("Brass",           "Leads",  ChordOsc::Saw,     0.04f,  1.2f, 0.8f,  5.f, 900,   2600,  4,    1.0f, 0.4f, 0.55f, 0.2f,  0.05f);
+    poly("Pluck",           "Leads",  ChordOsc::Saw,     0.002f, 6.f,  0.f,   8.f, 450,   4200,  14,   1.3f, 0.3f, 0.6f,  0.25f, 0.25f);
+    poly("Electric piano",  "Keys",   ChordOsc::EPiano,  0.002f, 1.0f, 0.f,   4.f, 6000,  0,     8,    0.9f, 0.f,  0.7f,  0.25f, 0.05f);
+    poly("Organ",           "Keys",   ChordOsc::Organ,   0.003f, 0.f,  1.f,   12.f, 5000, 0,     8,    0.9f, 0.f,  0.45f, 0.2f,  0.05f);
+    poly("Bells",           "Keys",   ChordOsc::Bell,    0.002f, 2.f,  0.f,   3.f, 8000,  0,     8,    0.9f, 0.f,  0.55f, 0.35f, 0.2f);
+    poly("Marimba",         "Keys",   ChordOsc::Marimba, 0.001f, 7.f,  0.f,   8.f, 8000,  0,     8,    0.9f, 0.f,  0.7f,  0.2f,  0.1f);
+    poly("Strings",         "Pads",   ChordOsc::Saw,     0.15f,  0.5f, 0.85f, 2.5f, 2600, 0,     8,    0.9f, 0.5f, 0.45f, 0.45f, 0.05f);
+    poly("Warm pad",        "Pads",   ChordOsc::Saw,     0.5f,   0.f,  1.f,   1.5f, 1400, 0,     8,    0.9f, 0.7f, 0.45f, 0.55f, 0.15f);
+
+    auto mono = [&](const char* name, MonoDef m, int transpose, float gain, float verb, float delay) {
+        LeadPatch p;
+        p.name = name;
+        p.group = "Mono";
+        p.kind = LeadPatch::MONO;
+        p.mono = m;
+        p.transpose = transpose;
+        p.gain = gain; p.verb = verb; p.delay = delay;
+        v.push_back(p);
+    };
+    {
+        MonoDef m; m.saw = 1; m.sub = 0; m.cutoff = 220; m.envAmt = 3000; m.envDecay = 6; m.res = 6.f; m.release = 25;
+        m.glide = 0.06f; m.drive = 1.8f; m.oscOctave = 0;
+        mono("Acid lead", m, 0, 0.8f, 0.15f, 0.25f);
+    }
+    {
+        MonoDef m; m.saw = 1; m.square = 0.5f; m.detune = 0.6f; m.sub = 0.f; m.cutoff = 1800; m.envAmt = 2500; m.envDecay = 4;
+        m.res = 1.5f; m.release = 8; m.glide = 0.08f; m.drive = 1.5f; m.oscOctave = 0;
+        mono("Mono synth lead", m, 0, 0.6f, 0.2f, 0.2f);
+    }
+    {
+        MonoDef m; m.saw = 1; m.sub = 0.6f; m.detune = 0.48f; m.cutoff = 260; m.envAmt = 2400; m.envDecay = 4; m.res = 1.6f;
+        m.release = 9; m.drive = 2.2f; m.oscOctave = 0;
+        mono("Reese bass", m, 0, 0.9f, 0.05f, 0.f);
+    }
+    {
+        MonoDef m; m.saw = 0; m.sine = 1; m.sub = 0; m.oscOctave = 0; m.cutoff = 8000; m.envAmt = 0; m.decay = 0.9f;
+        m.release = 4; m.glide = 0.09f; m.drop = 7; m.dropRate = 28; m.drive = 2.8f;
+        mono("808 bass", m, 0, 1.0f, 0.f, 0.f);
+    }
+    {
+        MonoDef m; m.saw = 0.8f; m.square = 0.6f; m.sub = 0.7f; m.detune = 0.3f; m.cutoff = 160; m.envAmt = 0;
+        m.lfoDepth = 2200; m.lfoRate = 2.f; m.res = 3.f; m.drive = 3.f; m.release = 10; m.oscOctave = 0;
+        mono("Wobble bass", m, 0, 0.8f, 0.05f, 0.f);
+    }
+    {
+        LeadPatch p; p.name = "Style bass"; p.group = "This style"; p.kind = LeadPatch::STYLE_BASS; p.gain = 0.9f;
+        p.verb = 0.05f; p.delay = 0.f; v.push_back(p);
+        LeadPatch c; c.name = "Style chord sound"; c.group = "This style"; c.kind = LeadPatch::STYLE_CHORDS; c.gain = 0.8f;
+        v.push_back(c);
+    }
+    return v;
+}
+}  // namespace
+
+const std::vector<LeadPatch>& leadPatches() {
+    static const std::vector<LeadPatch> v = buildLeads();
+    return v;
 }
 
 }  // namespace dnb

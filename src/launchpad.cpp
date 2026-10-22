@@ -55,6 +55,7 @@ int findContaining(const std::vector<std::string>& v, const char* needle) {
 
 struct MidiHub::KbPort {
     MidiHub* hub = nullptr;
+    std::atomic<int> route{ROUTE_LEAD};
     std::unique_ptr<RtMidiIn> in;
     std::atomic<double> lastActivity{-10.0};
     std::atomic<bool> error{false};
@@ -174,8 +175,10 @@ void MidiHub::scan(double now) {
         }
         failedOnce_.erase(name);
         kb->in->ignoreTypes(true, true, true);
+        kb->route = keyboardRoute(name);
         kb->in->setCallback(&MidiHub::onKeyboardMsg, kb.get());
-        logf("MIDI input connected: %s (plays bass; channel 10 plays drums)", name.c_str());
+        static const char* what[3] = {"the lead synth", "the bass", "the drums"};
+        logf("MIDI input connected: %s (plays %s; change it in Devices)", name.c_str(), what[keyboardRoute(name) % 3]);
         kbs_[name] = std::move(kb);
     }
 }
@@ -241,14 +244,14 @@ void MidiHub::onLaunchpadMsg(double, std::vector<unsigned char>* msg, void* user
     auto* self = static_cast<MidiHub*>(user);
     self->lpActivity_.store(monotonicSec());
     std::lock_guard<std::mutex> lk(self->mu_);
-    self->queue_.push_back({MidiMsg::LAUNCHPAD, *msg});
+    self->queue_.push_back({MidiMsg::LAUNCHPAD, ROUTE_LEAD, *msg});
 }
 
 void MidiHub::onKeyboardMsg(double, std::vector<unsigned char>* msg, void* user) {
     auto* kb = static_cast<KbPort*>(user);
     kb->lastActivity.store(monotonicSec());
     std::lock_guard<std::mutex> lk(kb->hub->mu_);
-    kb->hub->queue_.push_back({MidiMsg::KEYBOARD, *msg});
+    kb->hub->queue_.push_back({MidiMsg::KEYBOARD, kb->route.load(), *msg});
 }
 
 std::vector<MidiMsg> MidiHub::takeMessages() {
@@ -264,9 +267,27 @@ std::vector<MidiHub::KeyboardInfo> MidiHub::keyboards() const {
         if (isLaunchpadName(n)) continue;
         auto it = kbs_.find(n);
         out.push_back({n, kbDisabled_.count(n) == 0, it != kbs_.end(),
-                       it != kbs_.end() ? it->second->lastActivity.load() : -10.0});
+                       it != kbs_.end() ? it->second->lastActivity.load() : -10.0, keyboardRoute(n)});
     }
     return out;
+}
+
+int MidiHub::keyboardRoute(const std::string& name) const {
+    auto it = kbRoute_.find(name);
+    return it == kbRoute_.end() ? ROUTE_LEAD : it->second;
+}
+
+void MidiHub::setKeyboardRoute(const std::string& name, int route) {
+    kbRoute_[name] = route;
+    auto it = kbs_.find(name);
+    if (it != kbs_.end()) it->second->route = route;
+}
+
+void MidiHub::restore(const std::map<std::string, int>& routes, const std::set<std::string>& disabled) {
+    kbRoute_ = routes;
+    kbDisabled_ = disabled;
+    for (auto& kv : kbs_) kv.second->route = keyboardRoute(kv.first);
+    forceRescan();
 }
 
 void MidiHub::setKeyboardEnabled(const std::string& name, bool on) {

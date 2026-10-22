@@ -7,8 +7,11 @@ Everything is synthesised live (no samples), and every effect has its own light 
 
 ![LP-DNB on Windows](docs/screenshot.png)
 
+You can make your own named patterns under any style, and they're saved between sessions. A second
+MIDI keyboard can play a lead synth over the top, with a choice of 17 sounds.
+
 On Windows it opens a window with an on-screen Launchpad that mirrors the real one's lights (and can
-be clicked), a step sequencer, the effects, a style browser and a devices panel. Devices are detected
+be clicked), a step sequencer, the effects, the lead instrument, a style browser and a devices panel. Devices are detected
 live: plug the Launchpad in (or pull it out and plug it back) at any time and it reconnects by itself.
 Other MIDI keyboards and pad controllers are picked up automatically too.
 
@@ -32,6 +35,39 @@ Other MIDI keyboards and pad controllers are picked up automatically too.
 Chords are built from each style's scale, so they always fit the key (minor 7ths, major 9ths and so on
 come out naturally). Switching style or pattern happens at the end of the bar, and switching style also
 sets that style's tempo.
+
+## Your own patterns
+
+Every style holds up to 16 patterns: its 4 built-in ones plus 12 of your own.
+
+- **New pattern**: the **+** next to the pattern list, or **+ New** in the Sequencer tab. Give it a name
+  and start from a copy of the current pattern or from scratch. **Duplicate** makes a copy of whatever's playing.
+- **Rename / Delete** work on your own patterns. Built-in ones can be edited too, and **Reset** puts them back.
+- **On the Launchpad**: hold **View** and the top half shows styles (rows 1-2) and this style's patterns
+  (rows 3-4; yours are amber). The **Pat 1-4** buttons step through the page of four the current pattern is on.
+- **Saving is automatic.** Patterns, edits and settings (style, tempo, volume, audio device, lead sound,
+  what each keyboard plays) are written to a readable text file whenever they change:
+  - Windows: `%APPDATA%\LP-DNB\lp-dnb-data.txt`
+  - macOS: `~/Library/Application Support/LP-DNB/lp-dnb-data.txt`
+  - Linux: `~/.config/lp-dnb/lp-dnb-data.txt`
+
+  Patterns in it use the same text format as `src/styles.cpp`, so you can copy them between the two.
+
+## Playing over the top (second MIDI instrument)
+
+Plug in any other MIDI keyboard and it plays the **lead synth** over the beat. In the **Instrument** tab:
+
+- **Sound**: Supersaw lead, Square lead, Brass, Pluck, Electric piano, Organ, Bells, Marimba, Strings,
+  Warm pad (all polyphonic); Acid lead, Mono synth lead, Reese bass, 808 bass, Wobble bass (mono, gliding
+  between held notes); or the current style's own bass or chord sound.
+- **Volume**, **Octave** (-3 to +3) and **Snap to key**, which moves any wrong note to the nearest note in the
+  style's key. Orange dots on the keyboard show which notes are in the key.
+- Velocity, sustain pedal, pitch bend (+/-2 semitones) and mod wheel (vibrato) all work.
+- The on-screen keyboard can be clicked and dragged to try sounds without a MIDI keyboard.
+- Each keyboard can instead play the style's **bass** or its **drums**: choose next to its name (Instrument
+  or Devices tab). Notes on channel 10 always play drums.
+- The lead goes through the same effects as everything else, and each note sends a ripple across the
+  Launchpad, placed by pitch.
 
 ## Build
 
@@ -89,9 +125,11 @@ and print their levels; no hardware needed for either).
                                                    right column -^
 ```
 
-- **Play** starts/stops. **View**: tap to flip between PERFORM and EDIT; **hold** it and tap a pad in
-  the top half to pick a style (the pads light in each style's colour; the current one blinks).
-- **Pat 1–4**: the four patterns of the current style. Switches land on the next bar.
+- **Play** starts/stops. **View**: tap to flip between PERFORM and EDIT; **hold** it to show the picker:
+  styles on rows 1-2 (lit in each style's colour; the current one blinks) and this style's patterns on
+  rows 3-4 (built-in green, yours amber).
+- **Pat 1–4**: patterns of the current style, four at a time (the page the current pattern is on).
+  Switches land on the next bar.
 - **Drum row**: the style's six drum tracks, an extra one-shot (crash, cowbell, clap...), and on the
   right the style's chord sound, played on the last note pad you pressed. Hold it to sustain pads.
 - **Note row**: one octave of the style's scale on its bass synth.
@@ -102,14 +140,15 @@ and print their levels; no hardware needed for either).
 
 ## The window (Windows)
 
-- **Top bar**: Play/Stop, style, tempo, the style's patterns (switch on the next bar), volume, level meter.
+- **Top bar**: Play/Stop, style, pattern list (with **+** for a new one), tempo, volume, level meter.
 - **Launchpad** (left): a live copy of the lights, labelled for the current style. Click and hold pads
   exactly like the hardware.
 - **Sequencer** tab: click a step to toggle it. Right-click for more: accents, ghost notes, 2- and
   3-hit rolls on drums; notes, accents, slides and holds on the bass; chords (shown as i, IV, VII7...)
   and holds on the chord track. M mutes a track; clicking a track name selects it for the Launchpad's
-  EDIT view. Reset / clear / copy patterns.
+  EDIT view. Above the grid, every pattern of the style; below it, Duplicate, Rename, Delete, Reset, Clear.
 - **Effects** tab: the style's 16 effects. Hold a button to play one; hover for a description.
+- **Instrument** tab: the lead synth for a second MIDI keyboard (see above), with a playable keyboard.
 - **Styles** tab: all 12 styles with tempo, key and a description. Click to switch.
 - **Devices** tab: Launchpad status and port choice (auto-detect by default), other MIDI inputs with an
   on/off tick each and an activity light, and the audio output. Everything is rescanned every second.
@@ -168,9 +207,10 @@ pat("Two-step", {"x.........x.....",   // drums: x hit  X accent  o ghost  r 2-h
 ## Code map
 
 - `src/styles.cpp` – every style: sounds, key, swing, effect layout and patterns
-- `src/engine.cpp` – drum/bass/chord voices, sequencer (swing, rolls, slides), master FX chain (audio thread)
+- `src/engine.cpp` – drum/bass/chord/lead voices, sequencer (swing, rolls, slides), master FX chain (audio thread)
 - `src/controller.cpp` – button mapping (remapped per style) and all the light patterns (main thread)
 - `src/launchpad.cpp` – MIDI hub: hot-plug scanning, Launchpad protocol (double-buffered LED updates), other inputs
-- `src/app.cpp` – glues it together; audio device selection and hot-plug
+- `src/app.cpp` – glues it together: audio device and hot-plug, pattern bank, lead synth input, autosave
+- `src/storage.cpp` – the save file
 - `src/gui.cpp`, `src/main_win32.cpp` – the Windows window (Dear ImGui + Direct3D 11)
 - `src/main_console.cpp` – console front-end for macOS / Linux, plus the offline demo/test renderer

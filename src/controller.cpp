@@ -112,11 +112,11 @@ Controller::Controller(Shared& sh) : sh_(sh) {
 }
 
 double Controller::beatSec() const { return 60.0 / std::max(40.f, sh_.bpm.load()); }
-int Controller::currentStyle() const { return sh_.pattern.load() / kSlots; }
+int Controller::currentStyle() const { return sh_.pattern.load() / kMaxSlots; }
 
 void Controller::chooseStyle(int style) {
     if (style < 0 || style >= styleCount()) return;
-    sh_.send(Cmd::QueuePattern, style * kSlots);
+    sh_.send(Cmd::QueuePattern, style * kMaxSlots);
     const Style& s = styles()[static_cast<size_t>(style)];
     logf("Style: %s (%s, %.0f BPM)%s", s.name.c_str(), s.keyName.c_str(), s.bpm,
          sh_.playing.load() ? " - starts on the next bar" : "");
@@ -124,10 +124,10 @@ void Controller::chooseStyle(int style) {
 
 void Controller::choosePattern(int slot) {
     const int style = currentStyle();
-    sh_.send(Cmd::QueuePattern, style * kSlots + slot);
-    const Style& s = styles()[static_cast<size_t>(style)];
-    logf("Pattern %d: %s%s", slot + 1, s.patterns[static_cast<size_t>(slot)].name.c_str(),
-         sh_.playing.load() ? " (next bar)" : "");
+    if (slot < 0 || slot >= sh_.slotCount[style].load()) return;
+    const int p = style * kMaxSlots + slot;
+    sh_.send(Cmd::QueuePattern, p);
+    logf("Pattern %d: %s%s", slot + 1, sh_.patternName[p].c_str(), sh_.playing.load() ? " (next bar)" : "");
 }
 
 // ------------------------------------------------------------------ input --
@@ -150,10 +150,12 @@ void Controller::onGrid(int x, int y, bool down, double now) {
     const int p = sh_.pattern.load();
     const Style& st = styleOf(p);
 
-    // Holding View turns the top four rows into the style picker.
+    // Holding View turns the top half into a picker: styles on rows 1-2,
+    // this style's patterns (built-in and your own) on rows 3-4.
     if (viewHeld_ && y < 4) {
         if (down) {
-            chooseStyle(y * 8 + x);
+            if (y < 2) chooseStyle(y * 8 + x);
+            else choosePattern((y - 2) * 8 + x);
             comboUsed_ = true;
         }
         return;
@@ -301,17 +303,21 @@ void Controller::onTop(int i, bool down, double now) {
         default:
             if (!down) break;
             {
-                const int slot = i - 4;
+                // The four buttons show the "page" of four patterns the current one is on.
+                const int src = sh_.pattern.load();
+                const int slot = ((src % kMaxSlots) / 4) * 4 + (i - 4);
                 if (viewHeld_) {
-                    const int src = sh_.pattern.load();
-                    const int dst = (src / kSlots) * kSlots + slot;
-                    for (int t = 0; t < kTracks; ++t)
-                        for (int s = 0; s < kSteps; ++s) {
-                            sh_.on[dst][t][s].store(sh_.on[src][t][s].load());
-                            sh_.note[dst][t][s].store(sh_.note[src][t][s].load());
-                        }
+                    if (slot >= sh_.slotCount[src / kMaxSlots].load()) break;
+                    const int dst = (src / kMaxSlots) * kMaxSlots + slot;
+                    if (dst != src) {
+                        for (int t = 0; t < kTracks; ++t)
+                            for (int s = 0; s < kSteps; ++s) {
+                                sh_.on[dst][t][s].store(sh_.on[src][t][s].load());
+                                sh_.note[dst][t][s].store(sh_.note[src][t][s].load());
+                            }
+                        logf("Copied \"%s\" over \"%s\"", sh_.patternName[src].c_str(), sh_.patternName[dst].c_str());
+                    }
                     comboUsed_ = true;
-                    logf("Copied pattern %d -> %d", src % kSlots + 1, slot + 1);
                 } else {
                     choosePattern(slot);
                 }
@@ -662,7 +668,7 @@ void Controller::render(double now, Frame& out) {
     lastFrame_ = now;
 
     const int p = sh_.pattern.load();
-    const int styleIdx = p / kSlots;
+    const int styleIdx = p / kMaxSlots;
     const Style& st = styleOf(p);
     if (styleIdx != lastStyle_) {
         if (lastStyle_ >= 0) styleChangedAt_ = now;
@@ -676,6 +682,13 @@ void Controller::render(double now, Frame& out) {
         seenHits_[s] = h;
         hitTime_[s] = now;
         if (s == kBassSlot) { env_[T_BASS] = 1.f; continue; }
+        if (s == kLeadSlot) {  // lead synth: a ripple dropping from the top, placed by pitch
+            const int n = sh_.leadNote.load();
+            const float x = ((n % 12) * 7.f) / 11.f;
+            const Color lc = (n / 12) % 2 ? LIME : GREEN;
+            spawnRipple(x, -0.6f, lc, now, 7.f);
+            continue;
+        }
         if (s == kChordSlot) {
             env_[T_CHORD] = 1.f;
             spawnRipple(-1.f, 1.5f, YELLOW, now, 8.f);  // closes in from the sides
@@ -729,12 +742,24 @@ void Controller::render(double now, Frame& out) {
 
     // Style picker (while View is held): one pad per style, current one blinks.
     if (viewHeld_) {
-        for (int i = 0; i < 32; ++i) {
+        for (int i = 0; i < 16; ++i) {
             const int x = i % 8, y = i / 8;
             Color c = OFF;
             if (i < styleCount()) {
                 c = scale(ledToColor(styles()[static_cast<size_t>(i)].led), 0.5f);
                 if (i == styleIdx) c = frac(now * 3.0) < 0.5f ? ledToColor(styles()[static_cast<size_t>(i)].led) : DIM_AMBER;
+            }
+            grid[y][x] = c;
+        }
+        const int count = sh_.slotCount[styleIdx].load(), q = sh_.queued.load();
+        for (int k = 0; k < 16; ++k) {
+            const int x = k % 8, y = 2 + k / 8;
+            Color c = OFF;
+            if (k < count) {
+                c = k < kFactorySlots ? DIM_GREEN : DIM_AMBER;  // built-in / your own
+                const int pk = styleIdx * kMaxSlots + k;
+                if (pk == p) c = GREEN;
+                if (pk == q) c = frac(now * 4.0) < 0.5f ? AMBER : OFF;
             }
             grid[y][x] = c;
         }
@@ -817,11 +842,14 @@ void Controller::render(double now, Frame& out) {
     out[73] = quant(viewHeld_ ? ledToColor(st.led) : (view_ == EDIT ? AMBER : DIM_GREEN));
     out[74] = quant(bpmHeld_ < 0 ? AMBER : DIM_AMBER);
     out[75] = quant(bpmHeld_ > 0 ? AMBER : DIM_AMBER);
-    for (int i = 0; i < kSlots; ++i) {
-        Color c = DIM_RED;
-        if (styleIdx * kSlots + i == p) c = GREEN;
-        if (styleIdx * kSlots + i == queued) c = frac(now * 4.0) < 0.5f ? AMBER : OFF;
-        if (queued >= 0 && queued / kSlots != styleIdx && i == queued % kSlots)
+    const int page = ((p % kMaxSlots) / 4) * 4;
+    const int count = sh_.slotCount[styleIdx].load();
+    for (int i = 0; i < 4; ++i) {
+        const int slot = page + i;
+        Color c = slot < count ? (slot < kFactorySlots ? DIM_RED : DIM_AMBER) : OFF;
+        if (styleIdx * kMaxSlots + slot == p) c = GREEN;
+        if (styleIdx * kMaxSlots + slot == queued) c = frac(now * 4.0) < 0.5f ? AMBER : OFF;
+        if (queued >= 0 && queued / kMaxSlots != styleIdx && i == 0)
             c = frac(now * 4.0) < 0.5f ? ledToColor(styleOf(queued).led) : OFF;  // style change pending
         out[76 + i] = quant(c);
     }

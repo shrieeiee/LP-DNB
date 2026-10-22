@@ -29,8 +29,12 @@ namespace dnb {
 // One LED: low nibble = red 0..3, high nibble = green 0..3.
 using Frame = std::array<uint8_t, 80>;
 
+// What another MIDI input plays.
+enum KbRoute : int { ROUTE_LEAD = 0, ROUTE_BASS = 1, ROUTE_DRUMS = 2 };
+
 struct MidiMsg {
     enum Source { LAUNCHPAD, KEYBOARD } source = LAUNCHPAD;
+    int route = ROUTE_LEAD;  // for keyboards
     std::vector<unsigned char> bytes;
 };
 
@@ -68,9 +72,16 @@ public:
         bool enabled;
         bool open;
         double lastActivity;
+        int route;
     };
     std::vector<KeyboardInfo> keyboards() const;
     void setKeyboardEnabled(const std::string& name, bool on);
+    void setKeyboardRoute(const std::string& name, int route);
+    int keyboardRoute(const std::string& name) const;
+    // For saving / restoring between sessions.
+    const std::map<std::string, int>& routes() const { return kbRoute_; }
+    const std::set<std::string>& disabledInputs() const { return kbDisabled_; }
+    void restore(const std::map<std::string, int>& routes, const std::set<std::string>& disabled);
     double launchpadLastActivity() const { return lpActivity_.load(); }
 
 private:
@@ -101,6 +112,7 @@ private:
 
     std::map<std::string, std::unique_ptr<KbPort>> kbs_;
     std::set<std::string> kbDisabled_;
+    std::map<std::string, int> kbRoute_;
 
     mutable std::mutex mu_;
     std::vector<MidiMsg> queue_;

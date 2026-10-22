@@ -183,14 +183,15 @@ struct MonoVoice {
     void noteOff() { gate = false; }
     bool sounding() const { return gate || amp > 1e-4f; }
 
-    float tick(float sr, float beatHz) {
+    float vel = 1.f;
+    float tick(float sr, float beatHz, float pitchMul = 1.f) {
         if (!gate && amp < 1e-5f) {
             amp = 0.f;
             return 0.f;
         }
         if (glide > 0.f) freq += (target - freq) * (1.f - std::exp(-1.f / (glide * sr)));
         else freq = target;
-        float pitch = freq;
+        float pitch = freq * pitchMul;
         if (d.drop > 0.f) {
             pitch *= std::pow(2.f, d.drop * dropEnv / 12.f);
             dropEnv *= std::exp(-d.dropRate / sr);
@@ -224,7 +225,7 @@ struct MonoVoice {
         float drv = std::max(0.5f, d.drive);
         float y = std::tanh(tone * drv * (accentK > 1.f ? 1.2f : 1.f)) / std::tanh(drv) * 0.5f +
                   std::sin(kTwoPi * subPh) * d.sub * 0.6f;
-        return y * amp * d.gain;
+        return y * amp * d.gain * vel;
     }
 };
 
@@ -258,7 +259,7 @@ struct ChordVoice {
             relFrom = env;
         }
     }
-    float tick(float sr, Rng& rng) {
+    float tick(float sr, Rng& rng, float pitchMul = 1.f) {
         if (!active) return 0.f;
         // envelope
         if (gate) {
@@ -282,7 +283,7 @@ struct ChordVoice {
         float x = 0.f;
         const float det = d.detune * 0.01f;
         for (int i = 0; i < n; ++i) {
-            const float f = freqs[i];
+            const float f = freqs[i] * pitchMul;
             switch (d.osc) {
                 case ChordOsc::Saw:
                     x += saws[i][0].tick(f * (1.f - det), sr) + saws[i][1].tick(f * (1.f + det), sr);
@@ -400,6 +401,101 @@ struct LaserVoice {
 
 }  // namespace
 
+// ------------------------------------------------------------ lead synth --
+// The second MIDI instrument: up to 10 voices (poly patches) or one legato
+// voice (mono patches), with sustain pedal, pitch bend and mod-wheel vibrato.
+struct LeadSynth {
+    static constexpr int N = 10;
+    ChordVoice poly[N];
+    int polyNote[N];
+    bool polyHeld[N] = {}, polySus[N] = {};
+    uint64_t polyAge[N] = {};
+    MonoVoice mono;
+    int monoStack[16];
+    int monoCount = 0;
+    int patch = 0;
+    bool sustain = false, monoSus = false;
+    float bend = 0.f, mod = 0.f, vibPh = 0.f;
+    uint64_t counter = 0;
+
+    LeadSynth() { for (int& n : polyNote) n = -1; }
+
+    const LeadPatch& p() const { return leadPatches()[static_cast<size_t>(patch) % leadPatches().size()]; }
+    bool isMono() const { auto k = p().kind; return k == LeadPatch::MONO || k == LeadPatch::STYLE_BASS; }
+
+    void noteOn(const Style& st, int note, int velocity) {
+        const LeadPatch& lp = p();
+        const float v = 0.35f + 0.65f * std::min(127, std::max(1, velocity)) / 127.f;
+        if (isMono()) {
+            const MonoDef& d = lp.kind == LeadPatch::STYLE_BASS ? st.bass : lp.mono;
+            for (int i = 0; i < monoCount; ++i)
+                if (monoStack[i] == note) { for (int k = i; k < monoCount - 1; ++k) monoStack[k] = monoStack[k + 1]; --monoCount; break; }
+            if (monoCount < 16) monoStack[monoCount++] = note;
+            mono.noteOn(d, lp.transpose - 12 * d.oscOctave, note, velocity > 110, monoCount > 1);
+            mono.vel = v;
+            monoSus = false;
+            return;
+        }
+        ChordDef d = lp.kind == LeadPatch::STYLE_CHORDS ? st.chord : lp.poly;
+        const float f = 440.f * std::pow(2.f, (note + lp.transpose - 69) / 12.f);
+        int slot = -1;
+        for (int i = 0; i < N; ++i) if (polyNote[i] == note && (polyHeld[i] || polySus[i])) { slot = i; break; }
+        if (slot < 0) for (int i = 0; i < N; ++i) if (!poly[i].active) { slot = i; break; }
+        if (slot < 0) {  // steal the oldest released voice, else the oldest one
+            uint64_t best = UINT64_MAX;
+            for (int i = 0; i < N; ++i) if (!polyHeld[i] && polyAge[i] < best) { best = polyAge[i]; slot = i; }
+            if (slot < 0) for (int i = 0; i < N; ++i) if (polyAge[i] < best) { best = polyAge[i]; slot = i; }
+        }
+        poly[slot].noteOn(d, &f, 1, v);
+        polyNote[slot] = note;
+        polyHeld[slot] = true;
+        polySus[slot] = false;
+        polyAge[slot] = ++counter;
+    }
+
+    void noteOff(int note) {
+        if (isMono()) {
+            for (int i = 0; i < monoCount; ++i)
+                if (monoStack[i] == note) { for (int k = i; k < monoCount - 1; ++k) monoStack[k] = monoStack[k + 1]; --monoCount; break; }
+            if (monoCount == 0) {
+                if (sustain) monoSus = true;
+                else mono.noteOff();
+            }
+            return;
+        }
+        for (int i = 0; i < N; ++i) {
+            if (polyNote[i] != note || !polyHeld[i]) continue;
+            polyHeld[i] = false;
+            if (sustain) polySus[i] = true;
+            else poly[i].noteOff();
+        }
+    }
+
+    void setSustain(bool on) {
+        sustain = on;
+        if (on) return;
+        for (int i = 0; i < N; ++i) if (polySus[i]) { polySus[i] = false; poly[i].noteOff(); }
+        if (monoSus && monoCount == 0) mono.noteOff();
+        monoSus = false;
+    }
+
+    void allOff() {
+        for (int i = 0; i < N; ++i) { poly[i].noteOff(); polyHeld[i] = polySus[i] = false; }
+        mono.noteOff();
+        monoCount = 0;
+        monoSus = false;
+    }
+
+    float tick(float sr, float beatHz, Rng& rng) {
+        adv(vibPh, 5.5f / sr);
+        const float semis = bend + mod * 0.35f * std::sin(kTwoPi * vibPh);
+        const float pm = semis == 0.f ? 1.f : std::pow(2.f, semis / 12.f);
+        float y = mono.tick(sr, beatHz, pm);
+        for (auto& v : poly) y += v.tick(sr, rng, pm);
+        return y * p().gain;
+    }
+};
+
 // ================================================================ Impl ==
 
 struct Engine::Impl {
@@ -411,6 +507,7 @@ struct Engine::Impl {
     DrumVoice drums[7];
     MonoVoice bass;
     ChordVoice chords[3];
+    LeadSynth lead;
     int curChord = 0;
     SirenVoice siren;
     RiserVoice riser;
@@ -612,12 +709,12 @@ struct Engine::Impl {
     }
 
     void switchPattern(int p) {
-        const int oldStyle = pattern / kSlots;
+        const int oldStyle = pattern / kMaxSlots;
         pattern = p;
         queued = -1;
         sh.pattern.store(pattern);
         sh.queued.store(-1);
-        if (p / kSlots != oldStyle) sh.bpm.store(style().bpm);
+        if (p / kMaxSlots != oldStyle) sh.bpm.store(style().bpm);
     }
 
     void sequencerTick() {
@@ -781,6 +878,25 @@ struct Engine::Impl {
                     phase = stepLen;
                     sh.playing.store(true);
                     break;
+                case Cmd::LeadOn:
+                    lead.noteOn(style(), c.a, c.b);
+                    sh.leadNote.store(c.a, std::memory_order_relaxed);
+                    hit(kLeadSlot);
+                    break;
+                case Cmd::LeadOff: lead.noteOff(c.a); break;
+                case Cmd::JumpPattern:
+                    pattern = c.a;
+                    if (queued >= 0) { queued = -1; sh.queued.store(-1); }
+                    sh.pattern.store(c.a);
+                    break;
+                case Cmd::LeadPatch:
+                    lead.allOff();
+                    lead.patch = std::max(0, std::min(c.a, static_cast<int>(leadPatches().size()) - 1));
+                    break;
+                case Cmd::LeadSustain: lead.setSustain(c.a != 0); break;
+                case Cmd::LeadBend: lead.bend = c.f; break;
+                case Cmd::LeadMod: lead.mod = c.f; break;
+                case Cmd::LeadAllOff: lead.allOff(); lead.setSustain(false); break;
                 case Cmd::Stop:
                     playing = false;
                     if (liveCount == 0) bass.noteOff();
@@ -790,7 +906,8 @@ struct Engine::Impl {
                     sh.playing.store(false);
                     break;
                 case Cmd::QueuePattern:
-                    if (c.a < 0 || c.a >= styleCount() * kSlots) break;
+                    if (c.a < 0 || c.a / kMaxSlots >= styleCount() ||
+                        c.a % kMaxSlots >= sh.slotCount[c.a / kMaxSlots].load()) break;
                     if (playing) {
                         queued = c.a;
                         sh.queued.store(c.a);
@@ -812,6 +929,8 @@ struct Engine::Impl {
         const float lpDown = static_cast<float>(1.0 / (spb * 0.25));
         const double delaySamples = spb * 0.75;  // dotted eighth
         const float volTarget = clampf(sh.volume.load(std::memory_order_relaxed), 0.f, 1.f);
+        const float lv = clampf(sh.leadVolume.load(std::memory_order_relaxed), 0.f, 1.f);
+        const float leadVol = lv * lv * 1.2f;
 
         for (int i = 0; i < frames; ++i) {
             sequencerTick();
@@ -827,15 +946,17 @@ struct Engine::Impl {
             float ch = chords[0].tick(sr, rng) + chords[1].tick(sr, rng) + chords[2].tick(sr, rng);
             const ChordDef& cd = style().chord;
             float music = (bass.tick(sr, beatHz) * 0.9f + ch) * (1.f - duckAmt * duck);
+            const LeadPatch& lp = lead.p();
+            const float leadOut = lead.tick(sr, beatHz, rng) * leadVol * (1.f - 0.25f * duckAmt * duck);
             float sirenOut = siren.tick(sr);
             float hornOut = horn.tick(sr);
             float laserOut = laser.tick(sr, spb / 2.0, static_cast<double>(sampleCount));
             float fxs = sirenOut + riser.tick(sr, rng) + hornOut + laserOut;
 
             const float trim = style().trim;
-            float x = (drumsOut * 0.85f + music) * trim + fxs * 0.6f;
-            float auxRev = (ch * cd.verb + verbSend * 0.6f) * trim;
-            float auxDelay = sirenOut * 0.6f + hornOut * 0.25f + laserOut * 0.5f + ch * cd.delay;
+            float x = (drumsOut * 0.85f + music) * trim + leadOut + fxs * 0.6f;
+            float auxRev = (ch * cd.verb + verbSend * 0.6f) * trim + leadOut * lp.verb;
+            float auxDelay = sirenOut * 0.6f + hornOut * 0.25f + laserOut * 0.5f + ch * cd.delay + leadOut * lp.delay;
 
             // --- buffer effects (stutter / reverse / tape stop)
             ring[w] = x;

@@ -10,6 +10,7 @@
 #include "common.h"
 #include "controller.h"
 #include "launchpad.h"
+#include "storage.h"
 
 namespace dnb {
 
@@ -38,12 +39,34 @@ public:
     const std::string& audioStatus() const { return audioStatus_; }
     bool audioRunning() const;
 
+    // ---- Pattern bank (your own patterns, saved between sessions).
+    // Returns the new pattern index, or -1 if the style already has kMaxSlots patterns.
+    int newPattern(const std::string& name, bool copyCurrent);
+    void renamePattern(int pattern, const std::string& name);
+    bool deletePattern(int pattern);  // your own patterns only
+    std::string dataPath() const { return dataFilePath(); }
+    void saveNow();
+
+    // ---- Lead synth (second MIDI instrument).
+    int leadPatch() const { return leadPatch_; }
+    void setLeadPatch(int index);
+    int leadOctave() const { return leadOctave_; }
+    void setLeadOctave(int o) { releaseLeadNotes(); leadOctave_ = o < -3 ? -3 : (o > 3 ? 3 : o); }
+    bool leadSnap() const { return leadSnap_; }
+    void setLeadSnap(bool on) { releaseLeadNotes(); leadSnap_ = on; }
+    void leadKey(int note, bool down, int velocity = 100);  // on-screen keyboard
+    bool leadKeyHeld(int note) const;                     // for drawing keyboards (input notes)
+
 private:
     struct Audio;
     bool refreshAudioDevices();  // true if the list changed
     void openAudio();
-    void handleKeyboard(const std::vector<unsigned char>& m);
+    void handleKeyboard(const std::vector<unsigned char>& m, int route);
     void releaseKeyboardNotes();
+    void releaseLeadNotes();
+    void leadNote(int note, bool on, int velocity);
+    void loadSaved();
+    Settings currentSettings() const;
 
     std::unique_ptr<Shared> sh_;
     std::unique_ptr<Engine> engine_;
@@ -59,6 +82,14 @@ private:
 
     std::vector<std::pair<int, int>> kbNotes_;  // (MIDI note, semitone sent) held on keyboards
     size_t kbOpenCount_ = 0;
+
+    int leadPatch_ = 0, leadOctave_ = 0;
+    bool leadSnap_ = false;
+    std::vector<std::pair<int, int>> leadNotes_;  // (input note, note sent) held on the lead
+    bool sustainDown_ = false;
+
+    std::string lastSaved_;
+    double nextSave_ = 0.0;
 };
 
 }  // namespace dnb

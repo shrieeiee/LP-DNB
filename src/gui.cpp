@@ -126,7 +126,7 @@ void drawTopBar(App& app, GuiState& gs, double now) {
     Controller& ctl = app.controller();
     const float s = gs.scale;
     const bool playing = sh.playing.load();
-    const int pat = sh.pattern.load(), styleIdx = pat / kSlots, queued = sh.queued.load();
+    const int pat = sh.pattern.load(), styleIdx = pat / kMaxSlots, queued = sh.queued.load();
     const Style& st = styleOf(pat);
 
     if (coloredButton(playing ? "Stop" : "Play", playing ? kRed : kGreen, ImVec2(100 * s, 40 * s), true)) {
@@ -139,7 +139,7 @@ void drawTopBar(App& app, GuiState& gs, double now) {
     ImGui::BeginGroup();
     ImGui::TextColored(kLabel, "STYLE");
     ImGui::SetNextItemWidth(170 * s);
-    const bool stylePending = queued >= 0 && queued / kSlots != styleIdx;
+    const bool stylePending = queued >= 0 && queued / kMaxSlots != styleIdx;
     std::string preview = st.name;
     if (stylePending) preview += "  > " + styleOf(queued).name;
     if (ImGui::BeginCombo("##style", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -167,18 +167,30 @@ void drawTopBar(App& app, GuiState& gs, double now) {
     ImGui::EndGroup();
     ImGui::SameLine(0, 12 * s);
 
-    // Patterns of this style
+    // Patterns of this style (built-in + your own)
     ImGui::BeginGroup();
     ImGui::TextColored(kLabel, "PATTERN");
-    for (int i = 0; i < kSlots; ++i) {
-        if (i) ImGui::SameLine(0, 4 * s);
-        char label[96];
-        std::snprintf(label, sizeof label, "%d %s##pat%d", i + 1, st.patterns[static_cast<size_t>(i)].name.c_str(), i);
-        const int gi = styleIdx * kSlots + i;
-        const bool blink = gi == queued && std::fmod(now * 4.0, 1.0) < 0.5;
-        if (coloredButton(label, gi == pat ? kGreen : kAccent, ImVec2(0, ImGui::GetFrameHeight()), gi == pat || blink))
-            ctl.choosePattern(i);
+    {
+        const int count = sh.slotCount[styleIdx].load();
+        std::string pv = std::to_string(pat % kMaxSlots + 1) + "  " + sh.patternName[pat];
+        if (queued >= 0 && queued / kMaxSlots == styleIdx && queued != pat) pv += "  > " + sh.patternName[queued];
+        ImGui::SetNextItemWidth(200 * s);
+        if (ImGui::BeginCombo("##pattern", pv.c_str(), ImGuiComboFlags_HeightLarge)) {
+            for (int k = 0; k < count; ++k) {
+                if (k == kFactorySlots) ImGui::SeparatorText("Your patterns");
+                const int gi = styleIdx * kMaxSlots + k;
+                char lbl[128];
+                std::snprintf(lbl, sizeof lbl, "%d  %s##p%d", k + 1, sh.patternName[gi].c_str(), k);
+                if (ImGui::Selectable(lbl, gi == pat)) ctl.choosePattern(k);
+            }
+            ImGui::Separator();
+            if (count < kMaxSlots && ImGui::Selectable("+ New pattern...")) gs.openNew = true;
+            ImGui::EndCombo();
+        }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Switches at the end of the bar while playing");
+        ImGui::SameLine(0, 4 * s);
+        if (ImGui::Button("+##newpat") && count < kMaxSlots) gs.openNew = true;
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("New pattern in %s", st.name.c_str());
     }
     ImGui::EndGroup();
     ImGui::SameLine(0, 12 * s);
@@ -283,9 +295,21 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
             dl->AddRectFilled(a, b, ledColor(v), 4 * s);
             dl->AddRect(a, b, hov ? IM_COL32(220, 220, 230, 255) : (lit ? withAlpha(ledColor(v), 255) : kPadEdge), 4 * s, 0, 1.2f * s);
             std::string label;
-            if (picker && y < 4) {
+            if (picker && y < 2) {
                 const int i = y * 8 + x;
                 if (i < styleCount()) label = styles()[static_cast<size_t>(i)].padLabel;
+            } else if (picker && y < 4) {
+                const int k = (y - 2) * 8 + x, styleIdx = app.shared().pattern.load() / kMaxSlots;
+                if (k < app.shared().slotCount[styleIdx].load()) {
+                    // Short two-line version of the pattern name.
+                    std::string n = app.shared().patternName[styleIdx * kMaxSlots + k];
+                    const size_t sp = n.find(' ');
+                    if (sp != std::string::npos && sp <= 8) n = n.substr(0, sp) + "\n" + n.substr(sp + 1);
+                    std::string a = n.substr(0, n.find('\n')), b = n.find('\n') == std::string::npos ? "" : n.substr(n.find('\n') + 1);
+                    if (a.size() > 7) a = a.substr(0, 7);
+                    if (b.size() > 7) b = b.substr(0, 6) + ".";
+                    label = b.empty() ? a : a + "\n" + b;
+                }
             } else if (y == 4) {
                 label = x == kChordSlot ? std::string("Chord") : st.drums[static_cast<size_t>(x)].label;
             } else if (y == 5) {
@@ -322,7 +346,7 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
 
     ImGui::SetCursorScreenPos(ImVec2(o.x, o.y + pitch * 9 + topGap + 18 * s));
     if (picker) {
-        ImGui::TextColored(kAccent, "Pick a style: tap a pad in the top half.");
+        ImGui::TextColored(kAccent, "Rows 1-2: pick a style.  Rows 3-4: pick a pattern (yours are amber).");
     } else {
         ImGui::TextColored(kLabel, "%s view.", ctl.editView() ? "EDIT" : "PERFORM");
         ImGui::SameLine();
@@ -388,11 +412,33 @@ void drawSequencer(App& app, GuiState& gs) {
 
     ImGui::TextColored(styleAccent(st), "%s", st.name.c_str());
     ImGui::SameLine();
-    ImGui::Text("- %s", st.patterns[static_cast<size_t>(p % kSlots)].name.c_str());
+    ImGui::Text("- %s", sh.patternName[p].c_str());
     ImGui::SameLine();
     ImGui::TextColored(kHint, "   %s, %.0f BPM, swing %d%%", st.keyName.c_str(), st.bpm,
                        static_cast<int>(std::round((st.swing - 0.5f) / 0.16f * 100.f)));
     ImGui::TextColored(kHint, "%s", st.blurb.c_str());
+    // Pattern chips: every pattern of this style; yours are amber.
+    {
+        const int styleIdx = p / kMaxSlots, count = sh.slotCount[styleIdx].load(), queued = sh.queued.load();
+        const float maxX = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        for (int k = 0; k < count; ++k) {
+            const int gi = styleIdx * kMaxSlots + k;
+            char lbl[128];
+            std::snprintf(lbl, sizeof lbl, "%s##chip%d", sh.patternName[gi].c_str(), k);
+            const float w = ImGui::CalcTextSize(sh.patternName[gi].c_str()).x + ImGui::GetStyle().FramePadding.x * 2;
+            if (k > 0 && ImGui::GetItemRectMax().x + 4 * s + w <= maxX) ImGui::SameLine(0, 4 * s);
+            const bool blink = gi == queued && std::fmod(ImGui::GetTime() * 4.0, 1.0) < 0.5;
+            ImVec4 col = gi == p ? kGreen : (k < kFactorySlots ? ImVec4(0.55f, 0.75f, 0.55f, 1) : kAccent);
+            if (coloredButton(lbl, col, ImVec2(0, 0), gi == p || blink)) app.controller().choosePattern(k);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s pattern %d%s", k < kFactorySlots ? "Built-in" : "Your", k + 1,
+                                  gi == p ? " (playing)" : " - click to switch on the next bar");
+        }
+        if (count < kMaxSlots) {
+            if (ImGui::GetItemRectMax().x + 8 * s + 70 * s <= maxX) ImGui::SameLine(0, 8 * s);
+            if (ImGui::Button("+ New")) gs.openNew = true;
+        }
+    }
     ImGui::TextColored(ImVec4(0.42f, 0.42f, 0.47f, 1), "Click a step to toggle it. Right-click for accents, rolls, notes, slides and holds.");
 
     const float muteW = 26 * s, nameW = 112 * s, groupGap = 8 * s, cellGap = 3 * s;
@@ -490,29 +536,100 @@ void drawSequencer(App& app, GuiState& gs) {
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Reset pattern")) loadPreset(sh, p);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Put this pattern back to how it started");
+    const bool builtin = p % kMaxSlots < kFactorySlots;
+    const bool full = sh.slotCount[p / kMaxSlots].load() >= kMaxSlots;
+    if (full) ImGui::BeginDisabled();
+    if (ImGui::Button("Duplicate")) {
+        app.newPattern(sh.patternName[p] + " copy", true);
+    }
+    if (full) ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip(full ? "This style already has 16 patterns" : "Make a copy of this pattern as one of your own");
     ImGui::SameLine();
-    if (ImGui::Button("Clear pattern"))
-        for (int t = 0; t < kTracks; ++t)
-            for (int stp = 0; stp < kSteps; ++stp) sh.on[p][t][stp].store(STEP_OFF);
-    ImGui::SameLine(0, 20 * s);
-    ImGui::TextColored(kLabel, "Copy to:");
-    const int base = (p / kSlots) * kSlots;
-    for (int q = 0; q < kSlots; ++q) {
-        if (base + q == p) continue;
-        ImGui::SameLine();
-        char lbl[16];
-        std::snprintf(lbl, sizeof lbl, "%d##copy", q + 1);
-        if (ImGui::Button(lbl)) {
-            for (int t = 0; t < kTracks; ++t)
-                for (int stp = 0; stp < kSteps; ++stp) {
-                    sh.on[base + q][t][stp].store(sh.on[p][t][stp].load());
-                    sh.note[base + q][t][stp].store(sh.note[p][t][stp].load());
-                }
-            logf("Copied pattern %d -> %d", p % kSlots + 1, q + 1);
+    if (builtin) {
+        const bool same = factoryUnchanged(sh, p);
+        if (same) ImGui::BeginDisabled();
+        if (ImGui::Button("Reset")) loadPreset(sh, p);
+        if (same) ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip(same ? "This built-in pattern is as it shipped" : "Put this built-in pattern back to how it shipped");
+    } else {
+        if (ImGui::Button("Rename")) {
+            gs.target = p;
+            std::snprintf(gs.nameBuf, sizeof gs.nameBuf, "%s", sh.patternName[p].c_str());
+            gs.openRename = true;
         }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Copy over \"%s\"", st.patterns[static_cast<size_t>(q)].name.c_str());
+        ImGui::SameLine();
+        if (ImGui::Button("Delete")) {
+            gs.target = p;
+            gs.openDelete = true;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear")) clearPattern(sh, p);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Turn every step off");
+    ImGui::SameLine(0, 16 * s);
+    ImGui::TextColored(ImVec4(0.42f, 0.42f, 0.47f, 1), "Saved automatically");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Your patterns, edits and settings are saved to\n%s", app.dataPath().c_str());
+}
+
+void drawPatternModals(App& app, GuiState& gs) {
+    Shared& sh = app.shared();
+    const float s = gs.scale;
+    if (gs.openNew) {
+        gs.openNew = false;
+        const int style = sh.pattern.load() / kMaxSlots;
+        std::snprintf(gs.nameBuf, sizeof gs.nameBuf, "My pattern %d", sh.slotCount[style].load() - kFactorySlots + 1);
+        ImGui::OpenPopup("New pattern");
+    }
+    if (gs.openRename) { gs.openRename = false; ImGui::OpenPopup("Rename pattern"); }
+    if (gs.openDelete) { gs.openDelete = false; ImGui::OpenPopup("Delete pattern"); }
+
+    const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("New pattern", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        const int p = sh.pattern.load();
+        ImGui::Text("New pattern in %s", styleOf(p).name.c_str());
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(300 * s);
+        const bool enter = ImGui::InputText("Name", gs.nameBuf, sizeof gs.nameBuf, ImGuiInputTextFlags_EnterReturnsTrue);
+        if (ImGui::RadioButton(("Start from a copy of \"" + sh.patternName[p] + "\"").c_str(), gs.newCopy)) gs.newCopy = true;
+        if (ImGui::RadioButton("Start from scratch (just a kick)", !gs.newCopy)) gs.newCopy = false;
+        ImGui::Spacing();
+        if (ImGui::Button("Create", ImVec2(120 * s, 0)) || enter) {
+            app.newPattern(gs.nameBuf, gs.newCopy);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120 * s, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Rename pattern", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(300 * s);
+        const bool enter = ImGui::InputText("Name", gs.nameBuf, sizeof gs.nameBuf, ImGuiInputTextFlags_EnterReturnsTrue);
+        if (ImGui::Button("Rename", ImVec2(120 * s, 0)) || enter) {
+            app.renamePattern(gs.target, gs.nameBuf);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120 * s, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Delete pattern", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (gs.target >= 0) ImGui::Text("Delete \"%s\"? This can't be undone.", sh.patternName[gs.target].c_str());
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.15f, 0.12f, 1));
+        if (ImGui::Button("Delete", ImVec2(120 * s, 0))) {
+            app.deletePattern(gs.target);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        if (ImGui::Button("Keep it", ImVec2(120 * s, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
 }
 
@@ -557,7 +674,7 @@ void drawEffects(App& app, GuiState& gs) {
 void drawStyles(App& app, GuiState& gs) {
     const float s = gs.scale;
     Controller& ctl = app.controller();
-    const int cur = app.shared().pattern.load() / kSlots;
+    const int cur = app.shared().pattern.load() / kMaxSlots;
     ImGui::TextColored(kHint, "Each style has its own sounds, key, swing, effects and four patterns. Switching happens on the next bar.");
     ImGui::Spacing();
     const float avail = ImGui::GetContentRegionAvail().x;
@@ -588,6 +705,187 @@ void drawStyles(App& app, GuiState& gs) {
         dl->PopClipRect();
         ImGui::PopID();
     }
+}
+
+const char* kRouteNames[3] = {"Lead synth", "Bass", "Drums"};
+
+bool routeCombo(MidiHub& midi, const std::string& name, int route, float width) {
+    ImGui::SetNextItemWidth(width);
+    bool changed = false;
+    if (ImGui::BeginCombo("##route", kRouteNames[route % 3])) {
+        for (int r = 0; r < 3; ++r)
+            if (ImGui::Selectable(kRouteNames[r], r == route)) {
+                midi.setKeyboardRoute(name, r);
+                changed = true;
+            }
+        ImGui::EndCombo();
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("What this keyboard plays.\nLead synth: the sound chosen in the Instrument tab\nBass: the style's bass in its key\nDrums: the style's kit\nChannel 10 always plays drums.");
+    return changed;
+}
+
+// Piano keyboard: click (and drag) to play the lead synth. Lower on a key = louder.
+void drawPiano(App& app, GuiState& gs, int lo, int hi, float height) {
+    const float s = gs.scale;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    auto isBlack = [](int n) { int k = n % 12; return k == 1 || k == 3 || k == 6 || k == 8 || k == 10; };
+    int whites = 0;
+    for (int n = lo; n <= hi; ++n) whites += isBlack(n) ? 0 : 1;
+    const float W = ImGui::GetContentRegionAvail().x;
+    const float ww = W / whites, bw = ww * 0.62f, bh = height * 0.6f;
+    const ImVec2 o = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton("piano", ImVec2(W, height));
+    const bool active = ImGui::IsItemActive();
+    const ImVec2 m = ImGui::GetIO().MousePos;
+
+    // Key positions
+    std::vector<std::pair<int, ImVec4>> rects;  // note, (x0,y0,x1,y1)
+    int wi = 0;
+    for (int n = lo; n <= hi; ++n) {
+        if (isBlack(n)) continue;
+        rects.push_back({n, ImVec4(o.x + wi * ww, o.y, o.x + (wi + 1) * ww - 1.5f * s, o.y + height)});
+        ++wi;
+    }
+    std::vector<std::pair<int, ImVec4>> blacks;
+    wi = 0;
+    for (int n = lo; n <= hi; ++n) {
+        if (!isBlack(n)) { ++wi; continue; }
+        const float cx = o.x + wi * ww;
+        blacks.push_back({n, ImVec4(cx - bw * 0.5f, o.y, cx + bw * 0.5f, o.y + bh)});
+    }
+    auto inside = [&](const ImVec4& r) { return m.x >= r.x && m.x < r.z && m.y >= r.y && m.y < r.w; };
+    int under = -1;
+    for (auto& b : blacks) if (inside(b.second)) under = b.first;
+    if (under < 0) for (auto& w : rects) if (inside(w.second)) under = w.first;
+
+    // Mouse playing, with glissando when dragging across keys.
+    if (active && under != gs.pianoHeld) {
+        if (gs.pianoHeld >= 0) app.leadKey(gs.pianoHeld, false);
+        gs.pianoHeld = under;
+        if (under >= 0) {
+            const float rel = (m.y - o.y) / height;
+            app.leadKey(under, true, std::max(30, std::min(127, static_cast<int>(40 + rel * 95))));
+        }
+    }
+    if (!active && gs.pianoHeld >= 0) {
+        app.leadKey(gs.pianoHeld, false);
+        gs.pianoHeld = -1;
+    }
+
+    const Style& st = styleOf(app.shared().pattern.load());
+    auto inKey = [&](int n) {
+        const int pc = (((n - st.root) % 12) + 12) % 12;
+        for (int v : st.scale) if (v == pc) return true;
+        return false;
+    };
+    const ImU32 lit = IM_COL32(120, 220, 140, 255);
+    for (auto& w : rects) {
+        const ImVec4& r = w.second;
+        const bool held = app.leadKeyHeld(w.first);
+        dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.z, r.w), held ? lit : IM_COL32(225, 225, 230, 255), 3 * s);
+        if (inKey(w.first)) dl->AddCircleFilled(ImVec2((r.x + r.z) * 0.5f, r.w - 9 * s), 3 * s, IM_COL32(255, 160, 40, 220));
+        if (w.first % 12 == 0) {
+            char lbl[16];
+            std::snprintf(lbl, sizeof lbl, "C%d", w.first / 12 - 1);
+            dl->AddText(ImVec2(r.x + 4 * s, r.w - 24 * s - ImGui::GetTextLineHeight() * 0.3f), IM_COL32(90, 90, 100, 255), lbl);
+        }
+    }
+    for (auto& b : blacks) {
+        const ImVec4& r = b.second;
+        const bool held = app.leadKeyHeld(b.first);
+        dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.z, r.w), held ? lit : IM_COL32(30, 30, 36, 255), 2 * s);
+        if (inKey(b.first)) dl->AddCircleFilled(ImVec2((r.x + r.z) * 0.5f, r.w - 8 * s), 2.5f * s, IM_COL32(255, 160, 40, 220));
+    }
+}
+
+void drawInstrument(App& app, GuiState& gs) {
+    const float s = gs.scale;
+    Shared& sh = app.shared();
+    MidiHub& midi = app.midi();
+    const Style& st = styleOf(sh.pattern.load());
+
+    ImGui::TextColored(kHint, "Play over the beat with a second MIDI instrument (or click the keyboard below).");
+
+    // Which keyboards play the lead
+    auto kbs = midi.keyboards();
+    int leads = 0;
+    for (const auto& k : kbs) leads += (k.enabled && k.route == ROUTE_LEAD) ? 1 : 0;
+    if (kbs.empty()) {
+        ImGui::TextColored(kLabel, "No MIDI keyboard plugged in. Plug one in any time and it will play this sound.");
+    } else {
+        for (const auto& k : kbs) {
+            ImGui::PushID(k.name.c_str());
+            const double now = monotonicSec();
+            statusDot(!k.enabled ? IM_COL32(70, 70, 78, 255)
+                                 : (now - k.lastActivity < 0.12 ? IM_COL32(255, 200, 60, 255) : IM_COL32(80, 220, 90, 255)), s);
+            ImGui::Text("%s", k.name.c_str());
+            ImGui::SameLine(0, 12 * s);
+            ImGui::TextColored(kHint, "plays");
+            ImGui::SameLine();
+            routeCombo(midi, k.name, k.route, 140 * s);
+            ImGui::PopID();
+        }
+        if (leads == 0) ImGui::TextColored(kAccent, "None of your keyboards are set to play the lead synth.");
+    }
+    ImGui::Spacing();
+
+    // Sound
+    ImGui::SeparatorText("Sound");
+    const auto& pats = leadPatches();
+    std::string group;
+    const float indent = 95 * s, bw = 150 * s, maxX = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    for (size_t i = 0; i < pats.size(); ++i) {
+        const LeadPatch& lp = pats[i];
+        if (lp.group != group) {
+            group = lp.group;
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(kLabel, "%s", group.c_str());
+            ImGui::SameLine(indent);
+        } else if (ImGui::GetItemRectMax().x + 6 * s + bw <= maxX) {
+            ImGui::SameLine(0, 6 * s);
+        } else {
+            ImGui::Dummy(ImVec2(0, 0));  // new row, indented under the group
+            ImGui::SameLine(indent);
+        }
+        std::string label = lp.name;
+        if (lp.kind == LeadPatch::STYLE_BASS) label = st.bass.name + " (style)";
+        if (lp.kind == LeadPatch::STYLE_CHORDS) label = st.chord.name + " (style)";
+        label += "##lp" + std::to_string(i);
+        if (coloredButton(label.c_str(), kAccent, ImVec2(bw, 0), app.leadPatch() == static_cast<int>(i)))
+            app.setLeadPatch(static_cast<int>(i));
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", lp.kind == LeadPatch::MONO || lp.kind == LeadPatch::STYLE_BASS
+                                        ? "Mono: one note at a time, glides between held notes"
+                                        : "Poly: play chords");
+    }
+    ImGui::Spacing();
+
+    // Controls
+    ImGui::SeparatorText("Controls");
+    float lv = sh.leadVolume.load();
+    ImGui::SetNextItemWidth(200 * s);
+    if (ImGui::SliderFloat("Volume", &lv, 0.f, 1.f, "%.2f")) sh.leadVolume.store(lv);
+    ImGui::SameLine(0, 24 * s);
+    ImGui::TextUnformatted("Octave");
+    ImGui::SameLine();
+    if (ImGui::Button("-##oct")) app.setLeadOctave(app.leadOctave() - 1);
+    ImGui::SameLine();
+    ImGui::Text("%+d", app.leadOctave());
+    ImGui::SameLine();
+    if (ImGui::Button("+##oct")) app.setLeadOctave(app.leadOctave() + 1);
+    ImGui::SameLine(0, 24 * s);
+    bool snap = app.leadSnap();
+    if (ImGui::Checkbox("Snap to key", &snap)) app.setLeadSnap(snap);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Wrong notes move to the nearest note in %s, so anything you play fits.\nThe orange dots on the keyboard show the notes in the key.", st.keyName.c_str());
+    ImGui::SameLine();
+    ImGui::TextColored(kHint, "(%s)", st.keyName.c_str());
+    ImGui::TextColored(kHint, "Sustain pedal, pitch bend (+/-2) and mod wheel (vibrato) work too.");
+    ImGui::Spacing();
+
+    const float ph = std::max(90 * s, std::min(150 * s, ImGui::GetContentRegionAvail().y - 8 * s));
+    drawPiano(app, gs, 48, 84, ph);
 }
 
 void drawDevices(App& app, GuiState& gs, double now) {
@@ -624,7 +922,7 @@ void drawDevices(App& app, GuiState& gs, double now) {
 
     ImGui::Spacing();
     ImGui::SeparatorText("Other MIDI inputs");
-    ImGui::TextColored(kHint, "Keyboards play the bass in the current style's key. Channel 10 (drum pads) plays the style's kit.");
+    ImGui::TextColored(kHint, "Choose what each one plays: the lead synth (Instrument tab), the style's bass, or its drums.");
     auto kbs = midi.keyboards();
     if (kbs.empty()) ImGui::TextColored(kLabel, "None plugged in.");
     for (const auto& k : kbs) {
@@ -637,6 +935,8 @@ void drawDevices(App& app, GuiState& gs, double now) {
                                           : (now - k.lastActivity < 0.12 ? IM_COL32(255, 200, 60, 255) : IM_COL32(80, 220, 90, 255)));
         statusDot(dot, s);
         ImGui::Text("%s", k.name.c_str());
+        ImGui::SameLine(0, 12 * s);
+        routeCombo(midi, k.name, k.route, 140 * s);
         ImGui::SameLine();
         ImGui::TextColored(kHint, "%s", !k.enabled ? "(off)" : (k.open ? "" : "(in use by another app?)"));
         ImGui::PopID();
@@ -752,13 +1052,14 @@ void drawGui(App& app, GuiState& gs, double now) {
     ImGui::BeginChild("right", ImVec2(0, ImGui::GetContentRegionAvail().y - logH - ImGui::GetStyle().ItemSpacing.y),
                       ImGuiChildFlags_AlwaysUseWindowPadding);
     if (ImGui::BeginTabBar("tabs")) {
-        const char* names[4] = {"Sequencer", "Effects", "Styles", "Devices"};
-        for (int i = 0; i < 4; ++i) {
+        const char* names[5] = {"Sequencer", "Effects", "Instrument", "Styles", "Devices"};
+        for (int i = 0; i < 5; ++i) {
             if (ImGui::BeginTabItem(names[i], nullptr, gs.forceTab == i ? ImGuiTabItemFlags_SetSelected : 0)) {
                 switch (i) {
                     case 0: drawSequencer(app, gs); break;
                     case 1: drawEffects(app, gs); break;
-                    case 2: drawStyles(app, gs); break;
+                    case 2: drawInstrument(app, gs); break;
+                    case 3: drawStyles(app, gs); break;
                     default: drawDevices(app, gs, now); break;
                 }
                 ImGui::EndTabItem();
@@ -774,6 +1075,7 @@ void drawGui(App& app, GuiState& gs, double now) {
     ImGui::EndChild();
     ImGui::EndGroup();
 
+    drawPatternModals(app, gs);
     ImGui::End();
 }
 

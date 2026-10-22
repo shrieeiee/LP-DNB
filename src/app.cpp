@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 
 #include "engine.h"
@@ -51,10 +52,13 @@ struct App::Audio {
 App::App(bool nullAudio)
     : sh_(std::make_unique<Shared>()), audio_(std::make_unique<Audio>()) {
     loadAllPresets(*sh_);  // also builds the style table before audio starts
+    leadPatches();
     sh_->bpm.store(styles()[0].bpm);
+    midi_ = std::make_unique<MidiHub>();
+    loadSaved();           // your patterns and settings, before the engine starts
     engine_ = std::make_unique<Engine>(*sh_, static_cast<float>(kSampleRate));
     ctl_ = std::make_unique<Controller>(*sh_);
-    midi_ = std::make_unique<MidiHub>();
+    sh_->send(Cmd::LeadPatch, leadPatch_);
     audio_->engine = engine_.get();
 
     ma_result r;
@@ -76,6 +80,7 @@ App::App(bool nullAudio)
 }
 
 App::~App() {
+    saveNow();
     audio_->close();
     if (audio_->ctxOk) ma_context_uninit(&audio_->ctx);
 }
@@ -160,14 +165,41 @@ void App::selectAudio(const std::string& name) {
 
 // ------------------------------------------------------------- keyboards --
 
-void App::handleKeyboard(const std::vector<unsigned char>& m) {
+void App::handleKeyboard(const std::vector<unsigned char>& m, int route) {
+    if (m.size() < 2) return;
+    const int status = m[0] & 0xF0, ch = m[0] & 0x0F;
+
+    // Controllers for the lead synth: sustain pedal, mod wheel, pitch bend, all-notes-off.
+    if (route == ROUTE_LEAD && m.size() >= 3) {
+        if (status == 0xB0) {
+            if (m[1] == 64) {
+                sustainDown_ = m[2] >= 64;
+                sh_->send(Cmd::LeadSustain, sustainDown_ ? 1 : 0);
+            } else if (m[1] == 1) {
+                sh_->send(Cmd::LeadMod, 0, 0, m[2] / 127.f);
+            } else if (m[1] == 120 || m[1] == 123) {
+                releaseLeadNotes();
+            }
+            return;
+        }
+        if (status == 0xE0) {
+            const int v = (m[1] | (m[2] << 7)) - 8192;
+            sh_->send(Cmd::LeadBend, 0, 0, v / 8192.f * 2.f);  // +/- 2 semitones
+            return;
+        }
+    }
     if (m.size() < 3) return;
-    const int status = m[0] & 0xF0, ch = m[0] & 0x0F, note = m[1];
+    const int note = m[1];
     const bool on = status == 0x90 && m[2] > 0;
     const bool off = status == 0x80 || (status == 0x90 && m[2] == 0);
     if (!on && !off) return;
 
-    if (ch == 9) {  // General MIDI drum channel -> this style's drum pads
+    if (route == ROUTE_LEAD && ch != 9) {
+        leadNote(note, on, m[2]);
+        return;
+    }
+
+    if (ch == 9 || route == ROUTE_DRUMS) {  // drum channel / drum route -> this style's drum pads
         if (!on) return;
         int slot;
         switch (note) {
@@ -178,7 +210,7 @@ void App::handleKeyboard(const std::vector<unsigned char>& m) {
             case 39: case 51: case 53: case 59: slot = 4; break;
             case 37: case 41: case 43: case 45: case 47: case 48: case 50: slot = 5; break;
             case 49: case 52: case 55: case 56: case 57: slot = kExtraSlot; break;
-            default: slot = kChordSlot; break;
+            default: slot = (ch == 9 && route != ROUTE_DRUMS) ? kChordSlot : note % 8; break;
         }
         sh_->send(Cmd::Trigger, slot);
         return;
@@ -206,6 +238,168 @@ void App::handleKeyboard(const std::vector<unsigned char>& m) {
 void App::releaseKeyboardNotes() {
     for (const auto& n : kbNotes_) sh_->send(Cmd::BassOff, n.second);
     kbNotes_.clear();
+    releaseLeadNotes();
+}
+
+// -------------------------------------------------------------- lead synth --
+
+void App::leadNote(int note, bool on, int velocity) {
+    // Note-off sends whatever this key turned on, even if octave/snap changed since.
+    for (size_t i = 0; i < leadNotes_.size(); ++i) {
+        if (leadNotes_[i].first == note) {
+            sh_->send(Cmd::LeadOff, leadNotes_[i].second);
+            leadNotes_.erase(leadNotes_.begin() + static_cast<long>(i));
+            break;
+        }
+    }
+    if (!on) return;
+    int n = note + 12 * leadOctave_;
+    if (leadSnap_) {  // move to the nearest note in the style's key (ties go down)
+        const Style& st = styleOf(sh_->pattern.load());
+        const int pc = (((n - st.root) % 12) + 12) % 12;
+        int best = 0, bestDist = 99;
+        for (int s : st.scale)
+            for (int cand : {s, s - 12, s + 12}) {
+                const int d = cand - pc;
+                if (std::abs(d) < bestDist || (std::abs(d) == bestDist && d < best)) { bestDist = std::abs(d); best = d; }
+            }
+        n += best;
+    }
+    n = std::max(0, std::min(127, n));
+    leadNotes_.push_back({note, n});
+    sh_->send(Cmd::LeadOn, n, velocity);
+}
+
+void App::leadKey(int note, bool down, int velocity) { leadNote(note, down, velocity); }
+
+bool App::leadKeyHeld(int note) const {
+    for (const auto& n : leadNotes_)
+        if (n.first == note) return true;
+    return false;
+}
+
+void App::releaseLeadNotes() {
+    for (const auto& n : leadNotes_) sh_->send(Cmd::LeadOff, n.second);
+    leadNotes_.clear();
+}
+
+void App::setLeadPatch(int index) {
+    const int n = static_cast<int>(leadPatches().size());
+    if (index < 0 || index >= n) return;
+    releaseLeadNotes();
+    leadPatch_ = index;
+    sh_->send(Cmd::LeadPatch, index);
+    logf("Lead sound: %s", leadPatches()[static_cast<size_t>(index)].name.c_str());
+}
+
+// ----------------------------------------------------------- pattern bank --
+
+int App::newPattern(const std::string& name, bool copyCurrent) {
+    const int cur = sh_->pattern.load();
+    const int style = cur / kMaxSlots;
+    const int slot = sh_->slotCount[style].load();
+    if (slot >= kMaxSlots) return -1;
+    const int p = style * kMaxSlots + slot;
+    if (copyCurrent) {
+        copyPattern(*sh_, cur, p);
+    } else {
+        clearPattern(*sh_, p);
+        for (int s = 0; s < kSteps; s += 4) sh_->on[p][0][s].store(STEP_ON);  // start from a simple kick
+    }
+    sh_->patternName[p] = name.empty() ? "My pattern" : name;
+    sh_->slotCount[style].store(slot + 1);
+    sh_->send(Cmd::QueuePattern, p);
+    logf("New pattern: %s (%s)", sh_->patternName[p].c_str(), styleOf(p).name.c_str());
+    nextSave_ = 0.0;
+    return p;
+}
+
+void App::renamePattern(int p, const std::string& name) {
+    if (p < 0 || p >= kMaxPatterns || p % kMaxSlots < kFactorySlots || name.empty()) return;
+    sh_->patternName[p] = name;
+    nextSave_ = 0.0;
+}
+
+bool App::deletePattern(int p) {
+    const int style = p / kMaxSlots, slot = p % kMaxSlots;
+    const int count = sh_->slotCount[style].load();
+    if (slot < kFactorySlots || slot >= count) return false;
+    const std::string gone = sh_->patternName[p];
+    const int cur = sh_->pattern.load();
+    // Shift the later patterns down one.
+    for (int k = slot; k < count - 1; ++k) {
+        copyPattern(*sh_, style * kMaxSlots + k + 1, style * kMaxSlots + k);
+        sh_->patternName[style * kMaxSlots + k] = sh_->patternName[style * kMaxSlots + k + 1];
+    }
+    sh_->slotCount[style].store(count - 1);
+    if (cur / kMaxSlots == style) {
+        const int cs = cur % kMaxSlots;
+        if (cs == slot) sh_->send(Cmd::JumpPattern, style * kMaxSlots + std::min(slot, count - 2));
+        else if (cs > slot) sh_->send(Cmd::JumpPattern, cur - 1);
+    }
+    logf("Deleted pattern: %s", gone.c_str());
+    nextSave_ = 0.0;
+    return true;
+}
+
+// ------------------------------------------------------------ save / load --
+
+Settings App::currentSettings() const {
+    Settings st;
+    const int p = sh_->pattern.load();
+    st.styleName = styleOf(p).name;
+    st.patternName = sh_->patternName[p];
+    st.bpm = sh_->bpm.load();
+    st.volume = sh_->volume.load();
+    st.audioDevice = preferredAudio_;
+    st.leadPatch = leadPatches()[static_cast<size_t>(leadPatch_)].name;
+    st.leadVolume = sh_->leadVolume.load();
+    st.leadOctave = leadOctave_;
+    st.leadSnap = leadSnap_;
+    st.routes = midi_->routes();
+    st.disabledInputs = midi_->disabledInputs();
+    return st;
+}
+
+void App::loadSaved() {
+    Settings st;
+    std::string msg;
+    const bool found = loadData(*sh_, st, msg);
+    logf("%s", msg.c_str());
+    if (!found) return;
+    // What was playing last time.
+    for (int si = 0; si < styleCount(); ++si) {
+        if (styles()[static_cast<size_t>(si)].name != st.styleName) continue;
+        int p = si * kMaxSlots;
+        for (int k = 0; k < sh_->slotCount[si].load(); ++k)
+            if (sh_->patternName[si * kMaxSlots + k] == st.patternName) { p = si * kMaxSlots + k; break; }
+        sh_->pattern.store(p);
+        sh_->bpm.store(styles()[static_cast<size_t>(si)].bpm);
+        break;
+    }
+    if (st.bpm >= 40.f && st.bpm <= 220.f) sh_->bpm.store(st.bpm);
+    sh_->volume.store(std::max(0.f, std::min(1.f, st.volume)));
+    sh_->leadVolume.store(std::max(0.f, std::min(1.f, st.leadVolume)));
+    preferredAudio_ = st.audioDevice;
+    for (size_t i = 0; i < leadPatches().size(); ++i)
+        if (leadPatches()[i].name == st.leadPatch) leadPatch_ = static_cast<int>(i);
+    leadOctave_ = std::max(-3, std::min(3, st.leadOctave));
+    leadSnap_ = st.leadSnap;
+    midi_->restore(st.routes, st.disabledInputs);
+    lastSaved_ = serialize(*sh_, currentSettings());
+}
+
+void App::saveNow() {
+    const std::string text = serialize(*sh_, currentSettings());
+    if (text == lastSaved_) return;
+    std::string err;
+    if (writeData(text, err)) {
+        lastSaved_ = text;
+    } else {
+        static std::string lastErr;
+        if (err != lastErr) logf("Couldn't save: %s", err.c_str());
+        lastErr = err;
+    }
 }
 
 // ------------------------------------------------------------------- tick --
@@ -220,7 +414,7 @@ void App::virtualPress(int x, int y, bool down) {
 void App::tick(double now) {
     for (auto& m : midi_->takeMessages()) {
         if (m.source == MidiMsg::LAUNCHPAD) ctl_->onMidi(m.bytes, now);
-        else handleKeyboard(m.bytes);
+        else handleKeyboard(m.bytes, m.route);
     }
     if (midi_->poll(now)) ctl_->releaseAll(now);
 
@@ -228,6 +422,12 @@ void App::tick(double now) {
     for (const auto& k : midi_->keyboards()) open += k.open ? 1 : 0;
     if (open < kbOpenCount_) releaseKeyboardNotes();
     kbOpenCount_ = open;
+
+    // Autosave: patterns and settings are written whenever they change (checked every 2 s).
+    if (now >= nextSave_) {
+        nextSave_ = now + 2.0;
+        saveNow();
+    }
 
     ctl_->update(now);
     if (now >= nextLed_) {

@@ -95,12 +95,12 @@ struct Style {
     ChordDef chord;
     std::array<int, 16> fx{};  // effect on each of the 16 effect pads
     uint8_t led = 0x33;        // Launchpad colour of this style in the picker
-    std::array<PatternDef, kSlots> patterns;
+    std::array<PatternDef, kFactorySlots> patterns;  // built-in patterns
 };
 
 const std::vector<Style>& styles();  // built once, never changes
 inline int styleCount() { return static_cast<int>(styles().size()); }
-inline const Style& styleOf(int pattern) { return styles()[static_cast<size_t>(pattern / kSlots) % styles().size()]; }
+inline const Style& styleOf(int pattern) { return styles()[static_cast<size_t>(pattern / kMaxSlots) % styles().size()]; }
 
 // Scale degree (can be > 6 or negative) to semitones above the root.
 inline int degreeSemis(const Style& s, int deg) {
@@ -114,7 +114,28 @@ const char* noteNameFor(const Style& s, int semis);
 // Roman numeral for the chord built on a degree ("i", "IV", "ii°"...).
 std::string chordNumeral(const Style& s, int degree, int notes);
 
-void loadPreset(Shared& sh, int pattern);  // pattern = style * kSlots + slot
-void loadAllPresets(Shared& sh);
+void loadPreset(Shared& sh, int pattern);  // built-in slot only (slot < kFactorySlots)
+void loadAllPresets(Shared& sh);           // every style's built-in patterns + names
+
+// Pattern rows as text, in the same format as the built-in patterns above.
+void parseRow(const std::string& row, bool melodic, uint8_t codes[kSteps], int8_t notes[kSteps]);
+std::string encodeRow(const Shared& sh, int pattern, int track);
+void setRow(Shared& sh, int pattern, int track, const std::string& row);
+bool factoryUnchanged(const Shared& sh, int pattern);  // built-in pattern still as shipped
+void copyPattern(Shared& sh, int from, int to);
+void clearPattern(Shared& sh, int pattern);
+
+// ------------------------------------------------------------ lead synth --
+// Sounds for the second MIDI instrument. Poly patches use the chord synth one
+// voice per note; mono patches use the bass synth with legato glide.
+struct LeadPatch {
+    std::string name, group;
+    enum Kind { POLY, MONO, STYLE_BASS, STYLE_CHORDS } kind = POLY;
+    ChordDef poly;
+    MonoDef mono;
+    int transpose = 0;   // semitones added to the played note
+    float gain = 1.f, verb = 0.2f, delay = 0.1f;
+};
+const std::vector<LeadPatch>& leadPatches();
 
 }  // namespace dnb

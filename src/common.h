@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace dnb {
 
@@ -19,9 +20,10 @@ inline double monotonicSec() {
 
 constexpr int kTracks = 8;          // 6 drum tracks + bass + chords
 constexpr int kSteps = 16;
-constexpr int kSlots = 4;           // patterns per style
+constexpr int kFactorySlots = 4;    // built-in patterns per style (slots 0-3)
+constexpr int kMaxSlots = 16;       // built-in + your own patterns per style
 constexpr int kMaxStyles = 16;
-constexpr int kMaxPatterns = kMaxStyles * kSlots;  // pattern index = style * kSlots + slot
+constexpr int kMaxPatterns = kMaxStyles * kMaxSlots;  // pattern index = style * kMaxSlots + slot
 
 // Sequencer tracks (also the order of the right-hand scene buttons).
 constexpr int T_BASS = 6;
@@ -33,7 +35,8 @@ constexpr int kDrumTracks = 6;
 constexpr int kExtraSlot = 6;
 constexpr int kChordSlot = 7;
 constexpr int kBassSlot = 8;
-constexpr int kHitSlots = 9;
+constexpr int kLeadSlot = 9;   // lead synth (second MIDI instrument)
+constexpr int kHitSlots = 10;
 
 // Step codes stored in Shared::on (low nibble) plus flags.
 enum StepCode : uint8_t {
@@ -67,9 +70,21 @@ inline const char* fxName(int f) {
 }
 
 struct Cmd {
-    enum Type : uint8_t { Trigger, BassOn, BassOff, ChordOn, ChordOff, FxOn, FxOff, Play, Stop, QueuePattern };
+    enum Type : uint8_t {
+        Trigger, BassOn, BassOff, ChordOn, ChordOff, FxOn, FxOff, Play, Stop, QueuePattern,
+        LeadOn,       // a = MIDI note, b = velocity
+        LeadOff,      // a = MIDI note
+        LeadPatch,    // a = patch index
+        LeadSustain,  // a = pedal down (1) / up (0)
+        LeadBend,     // f = semitones
+        LeadMod,      // f = 0..1 (vibrato)
+        LeadAllOff,
+        JumpPattern,  // a = pattern; switch now, keep tempo (after patterns are reordered)
+    };
     Type type = Trigger;
     int a = 0;
+    int b = 0;
+    float f = 0.f;
 };
 
 // Single-producer / single-consumer lock-free ring buffer.
@@ -109,13 +124,19 @@ struct Shared {
     // Telemetry published by the audio thread for the light show / GUI.
     std::atomic<bool> playing{false};
     std::atomic<int> step{0};
-    std::atomic<int> pattern{0};   // style * kSlots + slot
+    std::atomic<int> pattern{0};   // style * kMaxSlots + slot
     std::atomic<int> queued{-1};
     std::atomic<uint32_t> hits[kHitSlots];
     std::atomic<int> bassPlaying{-1000};  // semitone currently sounding, -1000 if silent
     std::atomic<float> level{0.f};
     std::atomic<float> lpAmt{0.f}, hpAmt{0.f}, riserAmt{0.f}, tapeRate{1.f};
     std::atomic<float> beatPhase{0.f};  // 0..1 within the current beat
+    std::atomic<int> leadNote{60};      // last lead note played (for the lights)
+    std::atomic<float> leadVolume{0.8f};
+
+    // Pattern bank. slotCount is read by the audio thread; names are main-thread only.
+    std::atomic<int> slotCount[kMaxStyles];
+    std::string patternName[kMaxPatterns];
 
     SpscQueue<Cmd, 1024> cmds;
 
@@ -128,9 +149,10 @@ struct Shared {
                 }
         for (int t = 0; t < kTracks; ++t) mute[t].store(false);
         for (auto& h : hits) h.store(0);
+        for (auto& c : slotCount) c.store(kFactorySlots);
     }
 
-    void send(Cmd::Type type, int a = 0) { cmds.push(Cmd{type, a}); }
+    void send(Cmd::Type type, int a = 0, int b = 0, float f = 0.f) { cmds.push(Cmd{type, a, b, f}); }
 };
 
 }  // namespace dnb

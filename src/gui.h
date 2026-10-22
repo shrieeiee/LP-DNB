@@ -13,7 +13,13 @@ struct GuiState {
     ImFont* smallFont = nullptr;  // pad labels; falls back to the default font
     bool keyHeld[64] = {};
     int popupTrack = -1, popupStep = -1;  // step being edited in the right-click menu
-    int forceTab = -1;  // select a tab programmatically (0..2), then resets
+    int forceTab = -1;  // select a tab programmatically (0..4), then resets
+    // pattern management popups
+    bool openNew = false, openRename = false, openDelete = false;
+    bool newCopy = true;
+    int target = -1;
+    char nameBuf[64] = {};
+    int pianoHeld = -1;  // on-screen keyboard note held with the mouse
 };
 
 void setupGuiStyle(float scale);
