@@ -269,6 +269,7 @@ struct Engine::Impl {
 
     Reverb reverb;
     float level = 0.f;
+    float vol = 1.0f;
 
     Impl(Shared& s, float rate) : sh(s), sr(rate) {
         snare.init(sr);
@@ -517,6 +518,7 @@ struct Engine::Impl {
         const float lpUp = static_cast<float>(1.0 / (spb * 2.0));
         const float lpDown = static_cast<float>(1.0 / (spb * 0.25));
         const double delaySamples = spb * 0.75;  // dotted eighth
+        const float volTarget = clampf(sh.volume.load(std::memory_order_relaxed), 0.f, 1.f);
 
         for (int i = 0; i < frames; ++i) {
             sequencerTick();
@@ -586,10 +588,11 @@ struct Engine::Impl {
             float rl, rr;
             reverb.tick(y * rs + auxRev, 0.84f + 0.12f * rs, 0.3f, rl, rr);
 
+            vol += (volTarget * volTarget - vol) * 0.001f;  // squared = more natural taper
             float L = std::tanh((y + dl * 0.6f + rl * 0.9f) * 0.68f);
             float R = std::tanh((y + dr * 0.6f + rr * 0.9f) * 0.68f);
-            out[2 * i] = L;
-            out[2 * i + 1] = R;
+            out[2 * i] = L * vol;
+            out[2 * i + 1] = R * vol;
 
             float pk = std::max(std::fabs(L), std::fabs(R));
             level = pk > level ? pk : level * 0.9997f;

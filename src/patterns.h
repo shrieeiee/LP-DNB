@@ -51,22 +51,24 @@ inline const Preset kPresets[kPatterns] = {
       "x.....x.......x."}},
 };
 
-inline void loadPresets(Shared& sh) {
-    for (int p = 0; p < kPatterns; ++p) {
-        for (int t = 0; t < kTracks; ++t) {
-            const char* row = kPresets[p].rows[t];
-            for (int s = 0; s < kSteps && row[s]; ++s) {
-                char c = row[s];
-                if (t == T_BASS) {
-                    bool on = c >= '0' && c <= '7';
-                    sh.on[p][t][s].store(on ? 1 : 0);
-                    sh.bassNote[p][s].store(static_cast<int8_t>(on ? kBassScale[c - '0'] : 0));
-                } else {
-                    sh.on[p][t][s].store(c == 'x' ? 1 : 0);
-                }
+inline void loadPreset(Shared& sh, int p) {
+    for (int t = 0; t < kTracks; ++t) {
+        const char* row = kPresets[p].rows[t];
+        for (int s = 0; s < kSteps && row[s]; ++s) {
+            char c = row[s];
+            if (t == T_BASS) {
+                bool on = c >= '0' && c <= '7';
+                sh.on[p][t][s].store(on ? 1 : 0);
+                sh.bassNote[p][s].store(static_cast<int8_t>(on ? kBassScale[c - '0'] : 0));
+            } else {
+                sh.on[p][t][s].store(c == 'x' ? 1 : 0);
             }
         }
     }
+}
+
+inline void loadPresets(Shared& sh) {
+    for (int p = 0; p < kPatterns; ++p) loadPreset(sh, p);
 }
 
 }  // namespace dnb

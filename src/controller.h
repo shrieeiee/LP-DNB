@@ -19,6 +19,15 @@ public:
     void update(double now);  // auto-repeat for tempo buttons
     void render(double now, Frame& out);
 
+    // Lets go of every held pad (used when a device is unplugged mid-press).
+    void releaseAll(double now);
+
+    bool editView() const { return view_ == EDIT; }
+    int selectedTrack() const { return selTrack_; }
+    void selectTrack(int t) { selTrack_ = t; heldStep_ = -1; }
+    bool fxHeld(int f) const { return f >= 0 && f < FX_COUNT && fxHeld_[f]; }
+    int lastBassIndex() const { return lastBassIdx_; }
+
 private:
     enum View { PERFORM, EDIT };
 

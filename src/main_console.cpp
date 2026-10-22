@@ -1,26 +1,18 @@
-// lp-dnb: a drum & bass groovebox for the Novation Launchpad Mini (mk1/mk2).
-#define MINIAUDIO_IMPLEMENTATION
-#define MA_NO_ENCODING
-#define MA_NO_DECODING
-#define MA_NO_GENERATION
-#define MA_NO_RESOURCE_MANAGER
-#define MA_NO_NODE_GRAPH
-#define MA_NO_ENGINE
-#include "miniaudio.h"
-
+// lp-dnb console front-end (macOS / Linux, or anywhere without the GUI).
 #include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include "app.h"
 #include "common.h"
 #include "controller.h"
 #include "engine.h"
@@ -33,16 +25,6 @@ namespace {
 
 std::atomic<bool> gRunning{true};
 void onSignal(int) { gRunning = false; }
-
-double nowSec() {
-    using namespace std::chrono;
-    static const auto t0 = steady_clock::now();
-    return duration<double>(steady_clock::now() - t0).count();
-}
-
-void audioCallback(ma_device* dev, void* out, const void*, ma_uint32 frames) {
-    static_cast<Engine*>(dev->pUserData)->process(static_cast<float*>(out), static_cast<int>(frames));
-}
 
 void printLayout() {
     std::printf(
@@ -189,97 +171,41 @@ int runDemo(const std::string& path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    int portIn = -1, portOut = -1, fps = 30;
     float bpm = 174.f;
+    std::string audioName;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         auto next = [&]() -> const char* { return i + 1 < argc ? argv[++i] : ""; };
         if (a == "--list") {
-            Launchpad::listPorts();
+            MidiHub::listPorts();
             return 0;
-        } else if (a == "--in") {
-            portIn = std::atoi(next());
-        } else if (a == "--out") {
-            portOut = std::atoi(next());
         } else if (a == "--bpm") {
             bpm = static_cast<float>(std::atof(next()));
-        } else if (a == "--fps") {
-            fps = std::max(5, std::min(60, std::atoi(next())));
+        } else if (a == "--audio") {
+            audioName = next();
         } else if (a == "--demo") {
             return runDemo(next());
         } else {
-            std::printf(
-                "Usage: lp-dnb [--list] [--in N] [--out N] [--bpm 174] [--fps 30] [--demo out.wav]\n");
+            std::printf("Usage: lp-dnb [--list] [--bpm 174] [--audio \"device name\"] [--demo out.wav]\n");
             return a == "--help" || a == "-h" ? 0 : 1;
         }
     }
 
-    auto sh = std::make_unique<Shared>();
-    loadPresets(*sh);
-    sh->bpm.store(std::max(100.f, std::min(200.f, bpm)));
-
-    Launchpad lp;
-    std::string err;
-    if (!lp.open(portIn, portOut, err)) {
-        std::fprintf(stderr, "Launchpad: %s\n", err.c_str());
-        Launchpad::listPorts();
-        return 1;
-    }
-
-    // Audio
-    ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
-    cfg.playback.format = ma_format_f32;
-    cfg.playback.channels = 2;
-    cfg.sampleRate = 48000;
-    cfg.periodSizeInFrames = 256;
-    cfg.performanceProfile = ma_performance_profile_low_latency;
-    cfg.dataCallback = audioCallback;
-
-    // The engine needs the real sample rate, so init the device first.
-    std::unique_ptr<Engine> engine;
-    ma_device device;
-    if (ma_device_init(nullptr, &cfg, &device) != MA_SUCCESS) {
-        std::fprintf(stderr, "Could not open the audio output device.\n");
-        return 1;
-    }
-    engine = std::make_unique<Engine>(*sh, static_cast<float>(device.sampleRate));
-    device.pUserData = engine.get();
-    if (ma_device_start(&device) != MA_SUCCESS) {
-        std::fprintf(stderr, "Could not start audio.\n");
-        ma_device_uninit(&device);
-        return 1;
-    }
-    std::printf("Audio: %s @ %u Hz\n", device.playback.name, device.sampleRate);
+    App app;
+    app.shared().bpm.store(std::max(100.f, std::min(200.f, bpm)));
+    if (!audioName.empty()) app.selectAudio(audioName);
 
     std::signal(SIGINT, onSignal);
 #ifdef SIGTERM
     std::signal(SIGTERM, onSignal);
 #endif
-
     printLayout();
-    std::printf("Pattern 1 (%s) loaded at %.0f BPM. Press the top-left button to play.\n",
-                kPresets[0].name, sh->bpm.load());
+    std::printf("Waiting for a Launchpad (plug it in any time). Ctrl+C to quit.\n");
 
-    Controller ctl(*sh);
-    Frame frame{};
-    const double frameDt = 1.0 / fps;
-    double nextFrame = nowSec();
     while (gRunning) {
-        double now = nowSec();
-        int waitMs = static_cast<int>(std::max(0.0, (nextFrame - now) * 1000.0));
-        for (auto& m : lp.waitMessages(waitMs)) ctl.onMidi(m, nowSec());
-        now = nowSec();
-        ctl.update(now);
-        if (now >= nextFrame) {
-            ctl.render(now, frame);
-            lp.pushFrame(frame);
-            nextFrame += frameDt;
-            if (nextFrame < now) nextFrame = now + frameDt;  // don't spiral after a stall
-        }
+        app.tick(monotonicSec());
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
-
     std::printf("\nBye.\n");
-    ma_device_uninit(&device);
-    lp.close();
     return 0;
 }

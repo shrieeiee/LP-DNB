@@ -1,0 +1,209 @@
+// lp-dnb Windows GUI: Win32 window + Direct3D 11 + Dear ImGui.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <d3d11.h>
+
+#include <algorithm>
+
+#include "app.h"
+#include "common.h"
+#include "gui.h"
+#include "imgui.h"
+#include "imgui_impl_dx11.h"
+#include "imgui_impl_win32.h"
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+namespace {
+
+ID3D11Device* gDevice = nullptr;
+ID3D11DeviceContext* gContext = nullptr;
+IDXGISwapChain* gSwapChain = nullptr;
+ID3D11RenderTargetView* gRtv = nullptr;
+UINT gResizeW = 0, gResizeH = 0;
+bool gOccluded = false;
+
+void createRenderTarget() {
+    ID3D11Texture2D* back = nullptr;
+    gSwapChain->GetBuffer(0, IID_PPV_ARGS(&back));
+    if (back) {
+        gDevice->CreateRenderTargetView(back, nullptr, &gRtv);
+        back->Release();
+    }
+}
+
+void cleanupRenderTarget() {
+    if (gRtv) { gRtv->Release(); gRtv = nullptr; }
+}
+
+bool createDevice(HWND hwnd) {
+    DXGI_SWAP_CHAIN_DESC sd{};
+    sd.BufferCount = 2;
+    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.RefreshRate.Numerator = 60;
+    sd.BufferDesc.RefreshRate.Denominator = 1;
+    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.OutputWindow = hwnd;
+    sd.SampleDesc.Count = 1;
+    sd.Windowed = TRUE;
+    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0};
+    D3D_FEATURE_LEVEL got;
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2,
+                                               D3D11_SDK_VERSION, &sd, &gSwapChain, &gDevice, &got, &gContext);
+    if (hr == DXGI_ERROR_UNSUPPORTED)  // no GPU driver: fall back to software rendering
+        hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, levels, 2, D3D11_SDK_VERSION,
+                                           &sd, &gSwapChain, &gDevice, &got, &gContext);
+    if (hr != S_OK) return false;
+    createRenderTarget();
+    return true;
+}
+
+void cleanupDevice() {
+    cleanupRenderTarget();
+    if (gSwapChain) { gSwapChain->Release(); gSwapChain = nullptr; }
+    if (gContext) { gContext->Release(); gContext = nullptr; }
+    if (gDevice) { gDevice->Release(); gDevice = nullptr; }
+}
+
+LRESULT WINAPI wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) return true;
+    switch (msg) {
+        case WM_SIZE:
+            if (wParam == SIZE_MINIMIZED) return 0;
+            gResizeW = LOWORD(lParam);
+            gResizeH = HIWORD(lParam);
+            return 0;
+        case WM_GETMINMAXINFO: {
+            auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+            mmi->ptMinTrackSize.x = 900;
+            mmi->ptMinTrackSize.y = 600;
+            return 0;
+        }
+        case WM_DPICHANGED: {
+            const RECT* r = reinterpret_cast<RECT*>(lParam);
+            SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            return 0;
+        }
+        case WM_SYSCOMMAND:
+            if ((wParam & 0xfff0) == SC_KEYMENU) return 0;  // Alt doesn't open a menu
+            break;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        default:
+            break;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+bool fileExists(const char* path) { return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES; }
+
+}  // namespace
+
+int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
+    ImGui_ImplWin32_EnableDpiAwareness();
+    const float dpi = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
+
+    WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wndProc, 0, 0, hInst, nullptr, LoadCursor(nullptr, IDC_ARROW),
+                   nullptr, nullptr, L"LP-DNB", nullptr};
+    wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    RegisterClassExW(&wc);
+
+    RECT work{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    const int w = std::min(static_cast<int>(1400 * dpi), static_cast<int>(work.right - work.left));
+    const int h = std::min(static_cast<int>(880 * dpi), static_cast<int>(work.bottom - work.top));
+    HWND hwnd = CreateWindowW(wc.lpszClassName, L"LP-DNB  \u2013  drum & bass for Launchpad Mini", WS_OVERLAPPEDWINDOW,
+                              work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2,
+                              w, h, nullptr, nullptr, wc.hInstance, nullptr);
+
+    if (!createDevice(hwnd)) {
+        cleanupDevice();
+        MessageBoxW(nullptr, L"Couldn't start Direct3D 11.", L"LP-DNB", MB_ICONERROR);
+        UnregisterClassW(wc.lpszClassName, wc.hInstance);
+        return 1;
+    }
+    ShowWindow(hwnd, SW_SHOWDEFAULT);
+    UpdateWindow(hwnd);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;  // fixed layout, nothing to save
+
+    dnb::GuiState gs;
+    gs.scale = dpi;
+    dnb::setupGuiStyle(dpi);
+
+    const char* body = "C:\\Windows\\Fonts\\segoeui.ttf";
+    const char* semibold = "C:\\Windows\\Fonts\\seguisb.ttf";
+    if (fileExists(body)) {
+        io.Fonts->AddFontFromFileTTF(body, 17.f * dpi);
+        gs.smallFont = io.Fonts->AddFontFromFileTTF(fileExists(semibold) ? semibold : body, 13.f * dpi);
+    } else {
+        ImFontConfig cfg;
+        cfg.SizePixels = 13.f * dpi;
+        io.Fonts->AddFontDefault(&cfg);
+    }
+
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX11_Init(gDevice, gContext);
+
+    dnb::App app;
+
+    bool done = false;
+    while (!done) {
+        MSG msg;
+        while (PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+            if (msg.message == WM_QUIT) done = true;
+        }
+        if (done) break;
+
+        // MIDI, hot-plug and Launchpad lights keep running even when minimised.
+        const double now = dnb::monotonicSec();
+        app.tick(now);
+
+        if ((gOccluded && gSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) || IsIconic(hwnd)) {
+            Sleep(5);
+            continue;
+        }
+        gOccluded = false;
+
+        if (gResizeW != 0 && gResizeH != 0) {
+            cleanupRenderTarget();
+            gSwapChain->ResizeBuffers(0, gResizeW, gResizeH, DXGI_FORMAT_UNKNOWN, 0);
+            gResizeW = gResizeH = 0;
+            createRenderTarget();
+        }
+
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+        dnb::drawGui(app, gs, now);
+        ImGui::Render();
+
+        const float clear[4] = {0.07f, 0.07f, 0.086f, 1.f};
+        gContext->OMSetRenderTargets(1, &gRtv, nullptr);
+        gContext->ClearRenderTargetView(gRtv, clear);
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+
+        HRESULT hr = gSwapChain->Present(1, 0);  // vsync
+        gOccluded = hr == DXGI_STATUS_OCCLUDED;
+    }
+
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+    cleanupDevice();
+    DestroyWindow(hwnd);
+    UnregisterClassW(wc.lpszClassName, wc.hInstance);
+    return 0;
+}

@@ -5,10 +5,17 @@ Everything is synthesised live (no samples): punchy kick, crisp snares, 808-styl
 a detuned Reese bass with a sine sub, Fm9 chord stabs, plus 16 hold-to-play performance effects that
 each have their own light pattern on the pads.
 
+![LP-DNB on Windows](docs/screenshot.png)
+
+On Windows it opens a window with an on-screen Launchpad that mirrors the real one's lights (and can
+be clicked), a step sequencer, the effects, and a devices panel. Devices are detected live: plug the
+Launchpad in (or pull it out and plug it back) at any time and it reconnects by itself. Other MIDI
+keyboards and pad controllers are picked up automatically too.
+
 ## Build
 
-You need CMake (3.16+) and a C++17 compiler. The two libraries it uses (RtMidi for MIDI,
-miniaudio for audio) are included in `third_party/`, so there is nothing else to download.
+You need CMake (3.16+) and a C++17 compiler. The libraries it uses (RtMidi for MIDI, miniaudio for
+audio, Dear ImGui for the window) are included in `third_party/`, so there is nothing else to download.
 
 **Windows (Visual Studio 2019/2022, "Desktop development with C++")**
 
@@ -21,6 +28,8 @@ build\Release\lp-dnb.exe
 Using the CMake GUI instead: set "Where to build the binaries" to a `build` folder **inside** the
 project (e.g. `.../lp-dnb/build`), not the project folder itself. Press Configure, then Generate,
 then Open Project and build the `Release` configuration in Visual Studio.
+
+**macOS / Linux** build a console version (same synth, lights and hot-plugging, no window).
 
 **macOS**
 
@@ -36,12 +45,31 @@ cmake -S . -B build && cmake --build build -j
 ./build/lp-dnb
 ```
 
-Close any other app that's using the Launchpad (Ableton, Novation Components) first — on Windows only
-one program can open a MIDI port at a time.
+Close any other app that's using the Launchpad (Ableton, Novation Components). On Windows only one
+program can open a MIDI port at a time; LP-DNB keeps trying and connects as soon as it's free.
 
-Options: `--list` (show MIDI ports), `--in N --out N` (pick ports manually if auto-detect fails),
-`--bpm 174`, `--fps 30` (LED refresh rate; drop to 20 if the lights stutter),
+Console options: `--list` (show MIDI ports), `--bpm 174`, `--audio "device name"`,
 `--demo out.wav` (render a 24-bar demo with scripted effects, no hardware needed).
+
+## The window (Windows)
+
+- **Top bar**: Play/Stop, tempo, patterns (switch on the next bar), volume, level meter, step position.
+- **Launchpad** (left): a live copy of the lights. Click and hold pads exactly like the hardware.
+- **Sequencer** tab: click steps to toggle; right-click a bass step to pick its note. M mutes a track,
+  clicking a track name selects it for the Launchpad's EDIT view. Reset / clear / copy patterns.
+- **Effects** tab: hold a button to play the effect. Hover for a description.
+- **Devices** tab: Launchpad status and port choice (auto-detect by default), other MIDI inputs with an
+  on/off tick each and an activity light, and the audio output. Everything is rescanned every second.
+  If your chosen audio device is unplugged, sound moves to the system default and switches back
+  when it returns.
+- **Computer keyboard**: Space = play/stop, Z X C V B N M , = drums, 1–8 = bass,
+  Q–I and A–K = hold effects (same order as the pads).
+
+## Other MIDI controllers
+
+Any MIDI input that isn't the Launchpad is connected automatically when plugged in. Notes play the
+Reese bass (any key, folded into range); notes on channel 10 (General MIDI drums, as most pad
+controllers send) play the drums: 36 kick, 38 snare, 37/39 ghost, 42 hat, 46 open hat, 51 ride, 49 crash.
 
 ## Layout
 
@@ -91,5 +119,8 @@ touch sends a ripple. When stopped, it idles with a slow plasma.
 
 - `src/engine.cpp` – voices, sequencer, master FX chain (audio thread)
 - `src/controller.cpp` – button mapping and all the light patterns (main thread)
-- `src/launchpad.cpp` – Launchpad Mini protocol: double-buffered rapid LED updates
+- `src/launchpad.cpp` – MIDI hub: hot-plug scanning, Launchpad protocol (double-buffered LED updates), other inputs
+- `src/app.cpp` – glues it together; audio device selection and hot-plug
+- `src/gui.cpp`, `src/main_win32.cpp` – the Windows window (Dear ImGui + Direct3D 11)
+- `src/main_console.cpp` – console front-end for macOS / Linux
 - `src/patterns.h` – the four starter patterns as text; easy to edit

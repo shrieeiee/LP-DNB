@@ -1,6 +1,7 @@
-// Novation Launchpad Mini (mk1 / mk2, the micro-USB ones) MIDI I/O.
+// MIDI device handling: the Launchpad Mini (mk1 / mk2, the micro-USB ones)
+// plus any other MIDI inputs (keyboards, pads), with hot-plug detection.
 //
-// Protocol notes (Launchpad S/Mini programmer's reference):
+// Launchpad protocol notes (Launchpad S/Mini programmer's reference):
 //  * Grid pad (x,y) is note 16*y + x, y=0 at the top. Column 8 is the round
 //    "scene" buttons on the right. Pads send note-on, velocity 127/0.
 //  * The 8 round buttons along the top are CC 104..111.
@@ -11,11 +12,12 @@
 //    tearing while we stream whole frames.
 #pragma once
 #include <array>
-#include <condition_variable>
+#include <atomic>
 #include <cstdint>
-#include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -27,34 +29,81 @@ namespace dnb {
 // One LED: low nibble = red 0..3, high nibble = green 0..3.
 using Frame = std::array<uint8_t, 80>;
 
-class Launchpad {
+struct MidiMsg {
+    enum Source { LAUNCHPAD, KEYBOARD } source = LAUNCHPAD;
+    std::vector<unsigned char> bytes;
+};
+
+class MidiHub {
 public:
-    Launchpad();
-    ~Launchpad();
+    MidiHub();
+    ~MidiHub();
 
     static void listPorts();
-    // portIn/portOut < 0 means "auto-detect a port named Launchpad".
-    bool open(int portIn, int portOut, std::string& err);
-    void close();
 
-    // Blocks until a message arrives or `timeoutMs` elapses. Returns all queued messages.
-    std::vector<std::vector<unsigned char>> waitMessages(int timeoutMs);
-    // Stream a whole frame using double-buffered rapid update.
+    // Call regularly (every frame is fine); rescans ports about once a second,
+    // connecting new devices and dropping unplugged ones. Returns true if the
+    // Launchpad was just disconnected (so held pads can be released).
+    bool poll(double now);
+    void forceRescan() { nextScan_ = 0.0; }
+
+    std::vector<MidiMsg> takeMessages();
     void pushFrame(const Frame& f);
-    void clear();
+
+    // --- Launchpad selection. Empty name = auto-detect anything called "Launchpad".
+    void setLaunchpadPorts(const std::string& in, const std::string& out);
+    const std::string& wantedIn() const { return wantIn_; }
+    const std::string& wantedOut() const { return wantOut_; }
+    bool launchpadConnected() const { return lpIn_ != nullptr && lpOut_ != nullptr; }
+    const std::string& launchpadInName() const { return lpInName_; }
+    const std::string& launchpadOutName() const { return lpOutName_; }
+
+    // --- Port lists from the latest scan.
+    const std::vector<std::string>& inputs() const { return inNames_; }
+    const std::vector<std::string>& outputs() const { return outNames_; }
+
+    // --- Other MIDI inputs (keyboards etc.). New ones are enabled automatically.
+    struct KeyboardInfo {
+        std::string name;
+        bool enabled;
+        bool open;
+        double lastActivity;
+    };
+    std::vector<KeyboardInfo> keyboards() const;
+    void setKeyboardEnabled(const std::string& name, bool on);
+    double launchpadLastActivity() const { return lpActivity_.load(); }
 
 private:
-    static void onMessage(double, std::vector<unsigned char>* msg, void* user);
+    struct KbPort;
+    static void onLaunchpadMsg(double, std::vector<unsigned char>* msg, void* user);
+    static void onKeyboardMsg(double, std::vector<unsigned char>* msg, void* user);
+    void scan(double now);
+    void openLaunchpad(const std::string& in, const std::string& out);
+    void closeLaunchpad(const char* why);
     void send(unsigned char a, unsigned char b, unsigned char c);
+    bool isLaunchpadName(const std::string& n) const;
 
-    std::unique_ptr<RtMidiIn> in_;
-    std::unique_ptr<RtMidiOut> out_;
-    std::mutex mu_;
-    std::condition_variable cv_;
-    std::deque<std::vector<unsigned char>> queue_;
+    std::unique_ptr<RtMidiIn> scanIn_;
+    std::unique_ptr<RtMidiOut> scanOut_;
+    std::vector<std::string> inNames_, outNames_;
+    double nextScan_ = 0.0;
+
+    std::string wantIn_, wantOut_;
+    std::unique_ptr<RtMidiIn> lpIn_;
+    std::unique_ptr<RtMidiOut> lpOut_;
+    std::string lpInName_, lpOutName_;
+    std::atomic<bool> lpError_{false};
+    std::atomic<double> lpActivity_{-10.0};
+    std::set<std::string> failedOnce_;
     int updateBuf_ = 0;
     Frame shown_{};
     bool haveShown_ = false;
+
+    std::map<std::string, std::unique_ptr<KbPort>> kbs_;
+    std::set<std::string> kbDisabled_;
+
+    mutable std::mutex mu_;
+    std::vector<MidiMsg> queue_;
 };
 
 }  // namespace dnb

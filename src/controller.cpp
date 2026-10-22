@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdio>
 
+#include "log.h"
+
 namespace dnb {
 namespace {
 
@@ -130,8 +132,7 @@ void Controller::onGrid(int x, int y, bool down, double now) {
             fxPress_[f] = now;
             sh_.send(Cmd::FxOn, f);
             spawnRipple(static_cast<float>(x), static_cast<float>(y), kFxColor[f], now, 11.f);
-            std::printf("FX: %s\n", fxName(f));
-            std::fflush(stdout);
+            logf("FX: %s", fxName(f));
         } else if (!down && fxHeld_[f]) {
             fxHeld_[f] = false;
             fxRelease_[f] = now;
@@ -166,25 +167,23 @@ void Controller::onScene(int row, bool down) {
             const int p = sh_.pattern.load();
             for (int s = 0; s < kSteps; ++s) sh_.on[p][row][s].store(0);
             comboUsed_ = true;
-            std::printf("Cleared %s in pattern %d\n", trackName(row), p + 1);
+            logf("Cleared %s in pattern %d", trackName(row), p + 1);
         } else {
             selTrack_ = row;
             heldStep_ = -1;
-            std::printf("Editing: %s\n", trackName(row));
+            logf("Editing: %s", trackName(row));
         }
     } else {
         bool m = !sh_.mute[row].load();
         sh_.mute[row].store(m);
-        std::printf("%s %s\n", trackName(row), m ? "muted" : "unmuted");
+        logf("%s %s", trackName(row), m ? "muted" : "unmuted");
     }
-    std::fflush(stdout);
 }
 
 void Controller::nudgeBpm(float d) {
     float b = std::clamp(std::round(sh_.bpm.load() + d), 100.f, 200.f);
     sh_.bpm.store(b);
-    std::printf("Tempo: %.0f BPM\n", b);
-    std::fflush(stdout);
+    logf("Tempo: %.0f BPM", b);
 }
 
 void Controller::onTop(int i, bool down, double now) {
@@ -193,7 +192,7 @@ void Controller::onTop(int i, bool down, double now) {
             if (down) {
                 bool playing = sh_.playing.load();
                 sh_.send(playing ? Cmd::Stop : Cmd::Play);
-                std::printf("%s\n", playing ? "Stop" : "Play");
+                logf("%s", playing ? "Stop" : "Play");
             }
             break;
         case 1:
@@ -205,7 +204,7 @@ void Controller::onTop(int i, bool down, double now) {
                 if (!comboUsed_) {
                     view_ = view_ == PERFORM ? EDIT : PERFORM;
                     heldStep_ = -1;
-                    std::printf("View: %s\n", view_ == EDIT ? "EDIT (steps on top two rows)" : "PERFORM");
+                    logf("View: %s", view_ == EDIT ? "EDIT (steps on top two rows)" : "PERFORM");
                 }
             }
             break;
@@ -229,15 +228,24 @@ void Controller::onTop(int i, bool down, double now) {
                         for (int s = 0; s < kSteps; ++s) sh_.on[target][t][s].store(sh_.on[src][t][s].load());
                     for (int s = 0; s < kSteps; ++s) sh_.bassNote[target][s].store(sh_.bassNote[src][s].load());
                     comboUsed_ = true;
-                    std::printf("Copied pattern %d -> %d\n", src + 1, target + 1);
+                    logf("Copied pattern %d -> %d", src + 1, target + 1);
                 } else {
                     sh_.send(Cmd::QueuePattern, target);
-                    std::printf("Pattern %d %s\n", target + 1, sh_.playing.load() ? "queued for next bar" : "selected");
+                    logf("Pattern %d %s", target + 1, sh_.playing.load() ? "queued for next bar" : "selected");
                 }
             }
             break;
     }
-    std::fflush(stdout);
+}
+
+void Controller::releaseAll(double now) {
+    for (int f = 0; f < FX_COUNT; ++f)
+        if (fxHeld_[f]) onGrid(f % 8, 6 + f / 8, false, now);
+    for (int x = 0; x < 8; ++x)
+        if (bassPadHeld_[x]) onGrid(x, 5, false, now);
+    heldStep_ = -1;
+    bpmHeld_ = 0;
+    viewHeld_ = false;
 }
 
 void Controller::update(double now) {

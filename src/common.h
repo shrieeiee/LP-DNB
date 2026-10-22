@@ -4,10 +4,18 @@
 #pragma once
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 
 namespace dnb {
+
+// Seconds since program start (steady clock). Used for all UI timing.
+inline double monotonicSec() {
+    using namespace std::chrono;
+    static const auto t0 = steady_clock::now();
+    return duration<double>(steady_clock::now() - t0).count();
+}
 
 constexpr int kTracks = 8;
 constexpr int kSteps = 16;
@@ -81,6 +89,7 @@ struct Shared {
     std::atomic<int8_t> bassNote[kPatterns][kSteps];
     std::atomic<bool> mute[kTracks];
     std::atomic<float> bpm{174.f};
+    std::atomic<float> volume{1.0f};  // master output 0..1
 
     // Telemetry published by the audio thread for the light show.
     std::atomic<bool> playing{false};
