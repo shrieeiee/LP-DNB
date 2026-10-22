@@ -324,7 +324,7 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
         if (ledLit(v)) dl->AddCircleFilled(c, r + 4 * s, withAlpha(ledColor(v), 70));
         dl->AddCircleFilled(c, r, ledColor(v));
         dl->AddCircle(c, r, hov ? IM_COL32(240, 235, 255, 255) : kPadEdge, 0, (hov ? 2.f : 1.2f) * s);
-        const char* lbl = x == 1 && picker ? "Style" : kTopLabel[x];
+        const char* lbl = x == 1 && picker ? "Style" : (picker && x == 2 ? "Page-" : (picker && x == 3 ? "Page+" : kTopLabel[x]));
         centeredText(dl, small, labelSize * 0.9f, ImVec2(c.x - r, c.y + r + 1 * s), ImVec2(c.x + r, c.y + r + labelSize + 3 * s),
                      kTextDim, lbl);
         if (hov && x == 1) ImGui::SetTooltip("Tap: switch PERFORM / EDIT view\nHold: pick a style on the top half");
@@ -349,7 +349,7 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
                 const int i = y * 8 + x;
                 if (i < styleCount()) label = styles()[static_cast<size_t>(i)].padLabel;
             } else if (picker && y < 4) {
-                const int k = (y - 2) * 8 + x, styleIdx = app.shared().pattern.load() / kMaxSlots;
+                const int k = ctl.pickerPage() * 16 + (y - 2) * 8 + x, styleIdx = app.shared().pattern.load() / kMaxSlots;
                 if (k < app.shared().slotCount[styleIdx].load()) {
                     // Short two-line version of the pattern name.
                     std::string n = app.shared().patternName[styleIdx * kMaxSlots + k];
@@ -396,7 +396,9 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
 
     ImGui::SetCursorScreenPos(ImVec2(o.x, o.y + pitch * 9 + topGap + 18 * s));
     if (picker) {
-        ImGui::TextColored(kAccent, "Rows 1-2: pick a style.  Rows 3-4: pick a pattern (yours are amber).");
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+        ImGui::TextColored(kAccent, "Rows 1-2: pick a style.  Rows 3-4: pick a pattern (yours are amber). Page-/Page+ for more.");
+        ImGui::PopTextWrapPos();
     } else {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
         ImGui::TextColored(kLabel, "%s view:", ctl.editView() ? "EDIT" : "PERFORM");

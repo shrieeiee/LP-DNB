@@ -27,6 +27,7 @@ public:
 
     bool editView() const { return view_ == EDIT; }
     bool stylePickerShown() const { return viewHeld_; }
+    int pickerPage() const { return pickerPage_; }
     int selectedTrack() const { return selTrack_; }
     void selectTrack(int t) { selTrack_ = t; heldStep_ = -1; }
     bool fxHeld(int fx) const { return fx >= 0 && fx < FX_COUNT && fxHeld_[fx]; }
@@ -84,6 +85,7 @@ private:
     Color crushCells_[8][4] = {};
     double lastFrame_ = 0.0;
     int lastStyle_ = -1;
+    int pickerPage_ = 0;  // which 16 patterns the View picker shows
     double styleChangedAt_ = -10.0;
     Rng rng_;
 };

@@ -1,7 +1,7 @@
 # lp-dnb
 
 A multi-style groovebox for the original Novation **Launchpad Mini** (micro-USB, mk1/mk2), written in C++17.
-It started as drum & bass and now has **12 styles and 48 patterns**. Each style has its own drum kit,
+It started as drum & bass and now has **12 styles and 96 built-in patterns**. Each style has its own drum kit,
 bass synth, chord sound, key, swing and effects, and the Launchpad remaps itself for each one.
 Everything is synthesised live (no samples), and every effect has its own light pattern on the pads.
 
@@ -19,18 +19,18 @@ Other MIDI keyboards and pad controllers are picked up automatically too.
 
 | Style | BPM | Key | Sounds | Patterns |
 |---|---|---|---|---|
-| Drum & Bass | 174 | F minor | Punchy kick, ghost snares, Reese bass, rave stabs | Two-step, Amen roller, Jungle, Liquid |
-| House | 124 | A dorian | 909 kick, clap, shaker, deep sub, organ stabs | Classic, Deep, Jackin', Piano house |
-| Techno | 132 | E phrygian | Rumbling kick, acid 303 with slides and accents, dub chords | Peak time, Hypnotic, Industrial, Acid |
-| Hip-hop | 90 | D dorian | Dusty kick, swung hats, round bass, Rhodes | Boom bap, Off-kilter, Laid back, Jazzy |
-| Trap | 140 | G minor | 808 with pitch drop and slides, hi-hat rolls, bells | Classic, Rolling hats, Drill, Bounce |
-| Dubstep | 140 | F phrygian | Heavy kick, huge snare, tempo-synced wobble bass, dark pad | Half-time, Wobble, Riddim, Dub |
-| UK Garage | 132 | G minor | Heavy shuffle, rims, organ bass, M1 organ stabs | 2-step, Speed garage, Bumpy, Vocal |
-| Reggaeton | 95 | A minor | Dembow snare, timbales, sub bass, plucks | Dembow, Perreo, Dancehall, Moombah |
-| Disco | 118 | E dorian | Tambourine, cowbell, slap bass, strings | Four on the floor, Funk, Nu-disco, Cowbell groove |
-| Synthwave | 100 | A minor | Gated snare, 80s toms, pulsing arp bass, wide pads | Drive, Night drive, Outrun, Ballad |
-| Lo-fi | 78 | D dorian | Soft kit, lazy swing, warm sub, jazzy electric piano | Chill, Study, Rainy, Jazz hop |
-| Afro House | 122 | G dorian | Congas, shaker, clave, cowbell, marimba | Afro house, Afrobeats, Tribal, Log drum |
+| Drum & Bass | 174 | F minor | Punchy kick, ghost snares, Reese bass, rave stabs | Two-step, Amen roller, Jungle, Liquid, Amen (last bar), Think break, Halftime, Neuro stepper |
+| House | 124 | A dorian | 909 kick, clap, shaker, deep sub, organ stabs | Classic, Deep, Jackin', Piano house, Chicago jack, Shuffle, Tech house, Garage house |
+| Techno | 132 | E phrygian | Rumbling kick, acid 303 with slides and accents, dub chords | Peak time, Hypnotic, Industrial, Acid, Hard techno, Detroit, Minimal roller, Electro |
+| Hip-hop | 90 | D dorian | Dusty kick, swung hats, round bass, Rhodes | Boom bap, Off-kilter, Laid back, Jazzy, Funky Drummer, Impeach, Head nod, Bongo break |
+| Trap | 140 | G minor | 808 with pitch drop and slides, hi-hat rolls, bells | Classic, Rolling hats, Drill, Bounce, Triplet flow, Atlanta bounce, Grime hats drill, Rage |
+| Dubstep | 140 | F phrygian | Heavy kick, huge snare, tempo-synced wobble bass, dark pad | Half-time, Wobble, Riddim, Dub, Deep dub, Brostep, Tearout, Ghost hats |
+| UK Garage | 132 | G minor | Heavy shuffle, rims, organ bass, M1 organ stabs | 2-step, Speed garage, Bumpy, Vocal, Classic 2-step, Future garage, 4x4 garage, Grime |
+| Reggaeton | 95 | A minor | Dembow snare, timbales, sub bass, plucks | Dembow, Perreo, Dancehall, Moombah, Dembow timbal, Trapeton, One drop, Cumbia |
+| Disco | 118 | E dorian | Tambourine, cowbell, slap bass, strings | Four on the floor, Funk, Nu-disco, Cowbell groove, Philly, Boogie, Italo, Salsoul |
+| Synthwave | 100 | A minor | Gated snare, 80s toms, pulsing arp bass, wide pads | Drive, Night drive, Outrun, Ballad, Darksynth, Retro halftime, Power ballad, Chillwave |
+| Lo-fi | 78 | D dorian | Soft kit, lazy swing, warm sub, jazzy electric piano | Chill, Study, Rainy, Jazz hop, Dilla swing, Bossa, Brushes, Dusty boom bap |
+| Afro House | 122 | G dorian | Congas, shaker, clave, cowbell, marimba | Afro house, Afrobeats, Tribal, Log drum, Amapiano, Afrobeat, Gqom, Afro tech |
 
 Chords are built from each style's scale, so they always fit the key (minor 7ths, major 9ths and so on
 come out naturally). Switching style or pattern happens at the end of the bar, and switching style also
@@ -38,13 +38,14 @@ sets that style's tempo.
 
 ## Your own patterns
 
-Every style holds up to 16 patterns: its 4 built-in ones plus 12 of your own.
+Every style holds up to 24 patterns: its 8 built-in ones plus 16 of your own.
 
 - **New pattern**: the **+** next to the pattern list, or **+ New** in the Sequencer tab. Give it a name
   and start from a copy of the current pattern or from scratch. **Duplicate** makes a copy of whatever's playing.
 - **Rename / Delete** work on your own patterns. Built-in ones can be edited too, and **Reset** puts them back.
 - **On the Launchpad**: hold **View** and the top half shows styles (rows 1-2) and this style's patterns
-  (rows 3-4; yours are amber). The **Pat 1-4** buttons step through the page of four the current pattern is on.
+  (rows 3-4; yours are amber; BPM-/BPM+ page through if there are more than 16). The **Pat 1-4** buttons step
+  through the page of four the current pattern is on.
 - **Saving is automatic.** Patterns, edits and settings (style, tempo, volume, audio device, lead sound,
   what each keyboard plays) are written to a readable text file whenever they change:
   - Windows: `%APPDATA%\LP-DNB\lp-dnb-data.txt`
@@ -68,6 +69,19 @@ Plug in any other MIDI keyboard and it plays the **lead synth** over the beat. I
   or Devices tab). Notes on channel 10 always play drums.
 - The lead goes through the same effects as everything else, and each note sends a ripple across the
   Launchpad, placed by pitch.
+
+## Where the patterns come from
+
+The built-in patterns are written for this app's 16-step grid. The second set of four per style follows well-known
+grooves and common genre templates: classic breaks (Amen, Think, Funky Drummer, Impeach the President), the dembow
+3-3-2 spacing, Chicago/tech/garage house, 2-step and 4x4 garage, grime/drill hi-hat cadences, amapiano log-drum
+placement, and so on. Breakdowns used as references:
+[FaderPro: 5 kick and snare patterns](https://blog.faderpro.com/techniques/5-kick-and-snare-patterns-you-need-to-know/),
+[Ethan Hein: Building the Amen break](https://ethanhein.substack.com/p/building-the-amen-break),
+[Amped Studio: how to make a house beat](https://ampedstudio.com/blog/how-tomake-a-house-beat/),
+[Attack Magazine: UK drill, Beat Dissected](https://www.attackmagazine.com/technique/beat-dissected/uk-drill/),
+[UJAM: how to make a dembow groove](https://www.ujam.com/tutorials/how-to-make-a-dembow-groove/),
+[RouteNote: how to make an amapiano beat](https://create.routenote.com/blog/beatmakers-guide-how-to-make-an-amapiano-beat/).
 
 ## Build
 
@@ -106,7 +120,7 @@ Close any other app that's using the Launchpad (Ableton, Novation Components). O
 program can open a MIDI port at a time; LP-DNB keeps trying and connects as soon as it's free.
 
 Console options: `--list` (show MIDI ports), `--style N` (start in style N), `--audio "device name"`,
-`--demo out.wav` (render two patterns from every style), `--test [out.wav]` (render all 48 patterns
+`--demo out.wav` (render two patterns from every style), `--test [out.wav]` (render all 96 built-in patterns
 and print their levels; no hardware needed for either).
 
 ## Launchpad layout

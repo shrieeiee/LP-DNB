@@ -155,7 +155,7 @@ void Controller::onGrid(int x, int y, bool down, double now) {
     if (viewHeld_ && y < 4) {
         if (down) {
             if (y < 2) chooseStyle(y * 8 + x);
-            else choosePattern((y - 2) * 8 + x);
+            else choosePattern(pickerPage_ * 16 + (y - 2) * 8 + x);
             comboUsed_ = true;
         }
         return;
@@ -281,6 +281,7 @@ void Controller::onTop(int i, bool down, double now) {
             if (down) {
                 viewHeld_ = true;
                 comboUsed_ = false;
+                pickerPage_ = (sh_.pattern.load() % kMaxSlots) / 16;  // open on the current pattern's page
             } else {
                 viewHeld_ = false;
                 if (!comboUsed_) {
@@ -292,6 +293,14 @@ void Controller::onTop(int i, bool down, double now) {
             break;
         case 2:
         case 3:
+            if (viewHeld_) {  // while picking: page through the patterns (16 at a time)
+                if (down) {
+                    const int pages = (sh_.slotCount[currentStyle()].load() + 15) / 16;
+                    pickerPage_ = std::clamp(pickerPage_ + (i == 2 ? -1 : 1), 0, std::max(0, pages - 1));
+                    comboUsed_ = true;
+                }
+                break;
+            }
             if (down) {
                 bpmHeld_ = i == 2 ? -1 : 1;
                 nudgeBpm(static_cast<float>(bpmHeld_));
@@ -763,8 +772,8 @@ void Controller::render(double now, Frame& out) {
             grid[y][x] = c;
         }
         const int count = sh_.slotCount[styleIdx].load(), q = sh_.queued.load();
-        for (int k = 0; k < 16; ++k) {
-            const int x = k % 8, y = 2 + k / 8;
+        for (int kk = 0; kk < 16; ++kk) {
+            const int x = kk % 8, y = 2 + kk / 8, k = pickerPage_ * 16 + kk;
             Color c = OFF;
             if (k < count) {
                 c = k < kFactorySlots ? DIM_GREEN : DIM_AMBER;  // built-in / your own
@@ -851,8 +860,14 @@ void Controller::render(double now, Frame& out) {
     const int queued = sh_.queued.load();
     out[72] = quant(playing ? (curStep % 4 == 0 ? GREEN : DIM_GREEN) : Color{2.f, 0.f});
     out[73] = quant(viewHeld_ ? ledToColor(st.led) : (view_ == EDIT ? AMBER : DIM_GREEN));
-    out[74] = quant(bpmHeld_ < 0 ? AMBER : DIM_AMBER);
-    out[75] = quant(bpmHeld_ > 0 ? AMBER : DIM_AMBER);
+    if (viewHeld_) {  // BPM-/+ page the picker: lit when there's a page that way
+        const int pages = (sh_.slotCount[styleIdx].load() + 15) / 16;
+        out[74] = quant(pickerPage_ > 0 ? GREEN : OFF);
+        out[75] = quant(pickerPage_ < pages - 1 ? GREEN : OFF);
+    } else {
+        out[74] = quant(bpmHeld_ < 0 ? AMBER : DIM_AMBER);
+        out[75] = quant(bpmHeld_ > 0 ? AMBER : DIM_AMBER);
+    }
     const int page = ((p % kMaxSlots) / 4) * 4;
     const int count = sh_.slotCount[styleIdx].load();
     for (int i = 0; i < 4; ++i) {

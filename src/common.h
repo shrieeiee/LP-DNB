@@ -20,8 +20,8 @@ inline double monotonicSec() {
 
 constexpr int kTracks = 8;          // 6 drum tracks + bass + chords
 constexpr int kSteps = 16;
-constexpr int kFactorySlots = 4;    // built-in patterns per style (slots 0-3)
-constexpr int kMaxSlots = 16;       // built-in + your own patterns per style
+constexpr int kFactorySlots = 8;    // built-in patterns per style (slots 0-7)
+constexpr int kMaxSlots = 24;       // 8 built-in + up to 16 of your own per style
 constexpr int kMaxStyles = 16;
 constexpr int kMaxPatterns = kMaxStyles * kMaxSlots;  // pattern index = style * kMaxSlots + slot
 
