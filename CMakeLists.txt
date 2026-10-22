@@ -57,6 +57,9 @@ endif()
 # lp-tenori: a Tenori-on style sequencer on the same sound engine. A console
 # program on every platform.
 add_executable(lp-tenori ${CORE_SOURCES} src/tenori.cpp src/main_tenori.cpp)
+if(WIN32)
+  target_sources(lp-tenori PRIVATE src/lp-dnb.rc)  # same icon and version details
+endif()
 
 find_package(Threads REQUIRED)
 if(NOT WIN32 AND NOT APPLE)
