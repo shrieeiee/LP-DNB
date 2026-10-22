@@ -212,5 +212,6 @@ pat("Two-step", {"x.........x.....",   // drums: x hit  X accent  o ghost  r 2-h
 - `src/launchpad.cpp` – MIDI hub: hot-plug scanning, Launchpad protocol (double-buffered LED updates), other inputs
 - `src/app.cpp` – glues it together: audio device and hot-plug, pattern bank, lead synth input, autosave
 - `src/storage.cpp` – the save file
+- `assets/fonts/` – Nunito (SIL Open Font License), built into the program via `tools/embed_fonts.py`
 - `src/gui.cpp`, `src/main_win32.cpp` – the Windows window (Dear ImGui + Direct3D 11)
 - `src/main_console.cpp` – console front-end for macOS / Linux, plus the offline demo/test renderer

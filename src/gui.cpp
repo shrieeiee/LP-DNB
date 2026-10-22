@@ -16,16 +16,21 @@ namespace {
 
 // ------------------------------------------------------------ palette --
 
-const ImU32 kBg = IM_COL32(18, 18, 22, 255);
-const ImU32 kPanel = IM_COL32(28, 28, 34, 255);
-const ImU32 kPadOff = IM_COL32(44, 44, 52, 255);
-const ImU32 kPadEdge = IM_COL32(70, 70, 80, 255);
-const ImU32 kTextDim = IM_COL32(150, 150, 160, 255);
-const ImVec4 kAccent = ImVec4(1.00f, 0.62f, 0.10f, 1.f);  // amber
-const ImVec4 kGreen = ImVec4(0.30f, 0.85f, 0.35f, 1.f);
-const ImVec4 kRed = ImVec4(0.92f, 0.25f, 0.22f, 1.f);
-const ImVec4 kLabel = ImVec4(0.6f, 0.6f, 0.65f, 1.f);
-const ImVec4 kHint = ImVec4(0.5f, 0.5f, 0.55f, 1.f);
+// Soft dark violet base with candy accents. Text stays high-contrast.
+const ImU32 kBg = IM_COL32(26, 23, 36, 255);
+const ImU32 kPanel = IM_COL32(37, 33, 51, 255);
+const ImU32 kWell = IM_COL32(29, 26, 41, 255);       // recessed areas (Launchpad body, meters)
+const ImU32 kCell = IM_COL32(52, 47, 70, 255);       // empty step
+const ImU32 kCellBeat = IM_COL32(64, 58, 86, 255);   // empty step on the beat
+const ImU32 kPadOff = IM_COL32(60, 55, 80, 255);
+const ImU32 kPadEdge = IM_COL32(84, 77, 108, 255);
+const ImU32 kTextDim = IM_COL32(172, 165, 196, 255);
+const ImVec4 kAccent = ImVec4(1.00f, 0.66f, 0.40f, 1.f);  // peach
+const ImVec4 kGreen = ImVec4(0.42f, 0.88f, 0.62f, 1.f);   // mint
+const ImVec4 kRed = ImVec4(1.00f, 0.43f, 0.52f, 1.f);     // rose
+const ImVec4 kLilac = ImVec4(0.72f, 0.62f, 1.00f, 1.f);
+const ImVec4 kLabel = ImVec4(0.70f, 0.66f, 0.80f, 1.f);
+const ImVec4 kHint = ImVec4(0.58f, 0.55f, 0.68f, 1.f);
 
 const char* kFxShort[FX_COUNT] = {"Stut\n1/4", "Stut\n1/8", "Stut\n1/16", "Stut\n1/32", "Tape\nstop", "Half\ntime",
                                   "Rev", "Delay", "Low\npass", "High\npass", "Crush", "Flange", "Verb", "Siren",
@@ -48,16 +53,16 @@ const char* kTopLabel[8] = {"Play", "View", "BPM-", "BPM+", "1", "2", "3", "4"};
 // GUI colour for an LED colour (so tracks match their Launchpad pads).
 ImU32 guiColor(Color c) {
     const int r = static_cast<int>(c.r + 0.5f), g = static_cast<int>(c.g * 2.f + 0.5f);  // g in half steps
-    if (r >= 3 && g == 0) return IM_COL32(235, 70, 60, 255);     // red
-    if (r >= 3 && g >= 5) return IM_COL32(255, 180, 40, 255);    // amber
-    if (r >= 3) return IM_COL32(240, 125, 50, 255);              // orange
-    if (r == 0) return IM_COL32(90, 210, 90, 255);               // green
-    if (r == 2) return IM_COL32(235, 215, 70, 255);              // yellow
-    return IM_COL32(170, 225, 70, 255);                          // lime
+    if (r >= 3 && g == 0) return IM_COL32(255, 112, 128, 255);   // red -> strawberry
+    if (r >= 3 && g >= 5) return IM_COL32(255, 196, 92, 255);    // amber -> honey
+    if (r >= 3) return IM_COL32(255, 150, 100, 255);             // orange -> peach
+    if (r == 0) return IM_COL32(110, 225, 150, 255);             // green -> mint
+    if (r == 2) return IM_COL32(250, 226, 112, 255);             // yellow -> lemon
+    return IM_COL32(190, 235, 120, 255);                         // lime -> apple
 }
 ImU32 trackColor(const Style& s, int t) {
-    if (t == T_BASS) return IM_COL32(60, 200, 170, 255);
-    if (t == T_CHORD) return IM_COL32(200, 140, 240, 255);
+    if (t == T_BASS) return IM_COL32(100, 215, 215, 255);   // aqua
+    if (t == T_CHORD) return IM_COL32(190, 160, 255, 255);  // lilac
     return guiColor(slotColor(s, t));
 }
 
@@ -68,7 +73,8 @@ ImU32 ledColor(uint8_t v) {
     if (!r && !g) return kPadOff;
     int R = r ? 80 + 58 * r : 20 * g;
     int G = g ? static_cast<int>((70 + 60 * g) * (r ? 0.85f : 1.f)) : 15 * r;
-    return IM_COL32(std::min(R, 255), std::min(G, 255), 30, 255);
+    auto soft = [](int c) { return std::min(255, static_cast<int>(c * 0.86f + 255 * 0.14f)); };
+    return IM_COL32(soft(std::min(R, 255)), soft(std::min(G, 255)), soft(40), 255);
 }
 bool ledLit(uint8_t v) { return (v & 0x33) != 0; }
 
@@ -98,12 +104,13 @@ void centeredText(ImDrawList* dl, ImFont* font, float size, ImVec2 a, ImVec2 b, 
 }
 
 bool coloredButton(const char* label, ImVec4 col, ImVec2 size, bool active) {
-    ImVec4 base = active ? col : ImVec4(0.20f, 0.20f, 0.24f, 1.f);
-    ImVec4 hov = active ? ImVec4(col.x * 1.1f, col.y * 1.1f, col.z * 1.1f, 1.f) : ImVec4(0.27f, 0.27f, 0.32f, 1.f);
+    ImVec4 base = active ? col : ImVec4(0.25f, 0.23f, 0.34f, 1.f);
+    ImVec4 hov = active ? ImVec4(std::min(1.f, col.x * 1.08f), std::min(1.f, col.y * 1.08f), std::min(1.f, col.z * 1.08f), 1.f)
+                        : ImVec4(0.32f, 0.29f, 0.44f, 1.f);
     ImGui::PushStyleColor(ImGuiCol_Button, base);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hov);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, col);
-    ImGui::PushStyleColor(ImGuiCol_Text, active ? ImVec4(0.05f, 0.05f, 0.05f, 1.f) : ImVec4(0.92f, 0.92f, 0.94f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_Text, active ? ImVec4(0.13f, 0.10f, 0.18f, 1.f) : ImVec4(0.94f, 0.92f, 0.98f, 1.f));
     bool r = ImGui::Button(label, size);
     ImGui::PopStyleColor(4);
     return r;
@@ -112,8 +119,9 @@ bool coloredButton(const char* label, ImVec4 col, ImVec2 size, bool active) {
 void statusDot(ImU32 col, float s) {
     ImVec2 p = ImGui::GetCursorScreenPos();
     float h = ImGui::GetTextLineHeight();
-    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + 5 * s, p.y + h * 0.5f), 5 * s, col);
-    ImGui::Dummy(ImVec2(14 * s, h));
+    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + 7 * s, p.y + h * 0.5f), 7 * s, withAlpha(col, 60));
+    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + 7 * s, p.y + h * 0.5f), 4.5f * s, col);
+    ImGui::Dummy(ImVec2(18 * s, h));
     ImGui::SameLine();
 }
 
@@ -129,9 +137,34 @@ void drawTopBar(App& app, GuiState& gs, double now) {
     const int pat = sh.pattern.load(), styleIdx = pat / kMaxSlots, queued = sh.queued.load();
     const Style& st = styleOf(pat);
 
-    if (coloredButton(playing ? "Stop" : "Play", playing ? kRed : kGreen, ImVec2(100 * s, 40 * s), true)) {
-        app.virtualPress(0, -1, true);
-        app.virtualPress(0, -1, false);
+    {   // Big pill Play / Stop button with a drawn icon.
+        const ImVec2 sz(132 * s, 52 * s);
+        ImGui::BeginGroup();
+        ImGui::Dummy(ImVec2(0, 6 * s));  // centre it against the labelled controls
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        const bool pressed = ImGui::InvisibleButton("playstop", sz);
+        const bool hov = ImGui::IsItemHovered(), act = ImGui::IsItemActive();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec4 c = playing ? kRed : kGreen;
+        if (hov) c = ImVec4(std::min(1.f, c.x * 1.08f), std::min(1.f, c.y * 1.08f), std::min(1.f, c.z * 1.08f), 1.f);
+        const float press = act ? 2 * s : 0.f;
+        dl->AddRectFilled(ImVec2(a.x, a.y + 3 * s), ImVec2(a.x + sz.x, a.y + sz.y + 3 * s), withAlpha(ImGui::GetColorU32(c), 90), sz.y * 0.5f);
+        dl->AddRectFilled(ImVec2(a.x, a.y + press), ImVec2(a.x + sz.x, a.y + sz.y + press), ImGui::GetColorU32(c), sz.y * 0.5f);
+        const ImU32 ink = IM_COL32(33, 26, 46, 255);
+        const float cy = a.y + sz.y * 0.5f + press, ix = a.x + 30 * s, r = 9 * s;
+        if (playing) dl->AddRectFilled(ImVec2(ix - r, cy - r), ImVec2(ix + r, cy + r), ink, 4 * s);
+        else dl->AddTriangleFilled(ImVec2(ix - r * 0.8f, cy - r * 1.1f), ImVec2(ix - r * 0.8f, cy + r * 1.1f), ImVec2(ix + r * 1.1f, cy), ink);
+        ImFont* big = gs.bigFont ? gs.bigFont : ImGui::GetFont();
+        const char* txt = playing ? "Stop" : "Play";
+        const float fs = big->FontSize;
+        const ImVec2 ts = big->CalcTextSizeA(fs, 1e9f, 0.f, txt);
+        dl->AddText(big, fs, ImVec2(a.x + 50 * s + (sz.x - 50 * s - ts.x) * 0.45f, cy - ts.y * 0.5f), ink, txt);
+        if (pressed) {
+            app.virtualPress(0, -1, true);
+            app.virtualPress(0, -1, false);
+        }
+        if (hov) ImGui::SetTooltip("Space bar works too");
+        ImGui::EndGroup();
     }
     ImGui::SameLine(0, 16 * s);
 
@@ -160,10 +193,12 @@ void drawTopBar(App& app, GuiState& gs, double now) {
 
     // Tempo
     ImGui::BeginGroup();
-    ImGui::TextColored(kLabel, "TEMPO");
     float bpm = sh.bpm.load();
-    ImGui::SetNextItemWidth(130 * s);
-    if (ImGui::SliderFloat("##bpm", &bpm, 60.f, 200.f, "%.0f BPM")) sh.bpm.store(std::round(bpm));
+    ImGui::TextColored(kLabel, "TEMPO");
+    ImGui::SameLine();
+    ImGui::Text("%.0f BPM", bpm);
+    ImGui::SetNextItemWidth(170 * s);
+    if (ImGui::SliderFloat("##bpm", &bpm, 60.f, 200.f, "")) sh.bpm.store(std::round(bpm));
     ImGui::EndGroup();
     ImGui::SameLine(0, 12 * s);
 
@@ -197,10 +232,12 @@ void drawTopBar(App& app, GuiState& gs, double now) {
 
     // Volume + meter
     ImGui::BeginGroup();
-    ImGui::TextColored(kLabel, "VOLUME");
     float vol = sh.volume.load();
-    ImGui::SetNextItemWidth(100 * s);
-    if (ImGui::SliderFloat("##vol", &vol, 0.f, 1.f, "%.2f")) sh.volume.store(vol);
+    ImGui::TextColored(kLabel, "VOLUME");
+    ImGui::SameLine();
+    ImGui::Text("%d%%", static_cast<int>(std::round(vol * 100.f)));
+    ImGui::SetNextItemWidth(130 * s);
+    if (ImGui::SliderFloat("##vol", &vol, 0.f, 1.f, "")) sh.volume.store(vol);
     ImGui::EndGroup();
     ImGui::SameLine(0, 8 * s);
 
@@ -210,15 +247,15 @@ void drawTopBar(App& app, GuiState& gs, double now) {
         ImVec2 p = ImGui::GetCursorScreenPos();
         const float w = 90 * s, h = ImGui::GetFrameHeight();
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), IM_COL32(35, 35, 42, 255), 3 * s);
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), kWell, h * 0.5f);
         const float lv = std::min(1.f, sh.level.load());
         const int segs = 12;
         for (int i = 0; i < segs; ++i) {
-            float x0 = p.x + 3 * s + i * (w - 6 * s) / segs;
-            float x1 = x0 + (w - 6 * s) / segs - 2 * s;
+            float x0 = p.x + 10 * s + i * (w - 20 * s) / segs;
+            float x1 = x0 + (w - 20 * s) / segs - 3 * s;
             bool on = lv * segs > i;
-            ImU32 c = i < 8 ? IM_COL32(80, 210, 90, 255) : (i < 11 ? IM_COL32(240, 190, 50, 255) : IM_COL32(235, 70, 60, 255));
-            dl->AddRectFilled(ImVec2(x0, p.y + 4 * s), ImVec2(x1, p.y + h - 4 * s), on ? c : scaleCol(c, 0.18f), 1.5f * s);
+            ImU32 c = i < 8 ? IM_COL32(110, 225, 150, 255) : (i < 11 ? IM_COL32(255, 196, 92, 255) : IM_COL32(255, 112, 128, 255));
+            dl->AddRectFilled(ImVec2(x0, p.y + 9 * s), ImVec2(x1, p.y + h - 9 * s), on ? c : withAlpha(c, 45), 3 * s);
         }
         ImGui::Dummy(ImVec2(w, h));
     }
@@ -250,12 +287,12 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
     const float topGap = pitch * 0.18f;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImFont* small = gs.smallFont ? gs.smallFont : ImGui::GetFont();
-    const float labelSize = std::max(10.f * s, std::min(pad * 0.24f, 15.f * s));
+    const float labelSize = std::max(11.5f * s, std::min(pad * 0.27f, 16.f * s));
     const Frame& fr = app.frame();
     const bool picker = ctl.stylePickerShown();
 
-    dl->AddRectFilled(ImVec2(o.x - 10 * s, o.y - 10 * s), ImVec2(o.x + pitch * 9 + topGap + 10 * s, o.y + pitch * 9 + topGap + 10 * s),
-                      IM_COL32(12, 12, 14, 255), 10 * s);
+    dl->AddRectFilled(ImVec2(o.x - 14 * s, o.y - 14 * s), ImVec2(o.x + pitch * 9 + topGap + 14 * s, o.y + pitch * 9 + topGap + 14 * s),
+                      kWell, 26 * s);
 
     auto button = [&](int x, int y, ImVec2 a, ImVec2 b) {
         ImGui::SetCursorScreenPos(a);
@@ -276,7 +313,7 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
         uint8_t v = fr[72 + x];
         if (ledLit(v)) dl->AddCircleFilled(c, r + 4 * s, withAlpha(ledColor(v), 70));
         dl->AddCircleFilled(c, r, ledColor(v));
-        dl->AddCircle(c, r, hov ? IM_COL32(200, 200, 210, 255) : kPadEdge, 0, 1.2f * s);
+        dl->AddCircle(c, r, hov ? IM_COL32(240, 235, 255, 255) : kPadEdge, 0, (hov ? 2.f : 1.2f) * s);
         const char* lbl = x == 1 && picker ? "Style" : kTopLabel[x];
         centeredText(dl, small, labelSize * 0.9f, ImVec2(c.x - r, c.y + r + 1 * s), ImVec2(c.x + r, c.y + r + labelSize + 3 * s),
                      kTextDim, lbl);
@@ -291,9 +328,12 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
             bool hov = button(x, y, a, b);
             uint8_t v = fr[y * 8 + x];
             bool lit = ledLit(v);
-            if (lit) dl->AddRectFilled(ImVec2(a.x - 3 * s, a.y - 3 * s), ImVec2(b.x + 3 * s, b.y + 3 * s), withAlpha(ledColor(v), 60), 6 * s);
-            dl->AddRectFilled(a, b, ledColor(v), 4 * s);
-            dl->AddRect(a, b, hov ? IM_COL32(220, 220, 230, 255) : (lit ? withAlpha(ledColor(v), 255) : kPadEdge), 4 * s, 0, 1.2f * s);
+            const float pr = pad * 0.27f;  // soft, squircle-ish pads
+            if (lit) dl->AddRectFilled(ImVec2(a.x - 4 * s, a.y - 4 * s), ImVec2(b.x + 4 * s, b.y + 4 * s), withAlpha(ledColor(v), 55), pr + 4 * s);
+            dl->AddRectFilled(a, b, ledColor(v), pr);
+            if (lit) dl->AddRectFilled(ImVec2(a.x + pad * 0.14f, a.y + pad * 0.08f), ImVec2(b.x - pad * 0.14f, a.y + pad * 0.2f),
+                                       IM_COL32(255, 255, 255, 45), pad * 0.06f);  // little shine
+            dl->AddRect(a, b, hov ? IM_COL32(240, 235, 255, 255) : (lit ? withAlpha(ledColor(v), 255) : kPadEdge), pr, 0, (hov ? 2.f : 1.2f) * s);
             std::string label;
             if (picker && y < 2) {
                 const int i = y * 8 + x;
@@ -321,7 +361,7 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
                 label = std::to_string(y * 8 + x + 1);
             }
             if (!label.empty())
-                centeredText(dl, small, labelSize, a, b, lit ? IM_COL32(15, 15, 15, 230) : IM_COL32(175, 175, 185, 255), label.c_str());
+                centeredText(dl, small, labelSize, a, b, lit ? IM_COL32(40, 30, 50, 235) : IM_COL32(196, 190, 220, 255), label.c_str());
             if (hov && y == 4) ImGui::SetTooltip("%s", x == kChordSlot ? (st.chord.name + " (on the last note pad played)").c_str()
                                                                        : st.drums[static_cast<size_t>(x)].name.c_str());
             if (hov && y >= 6) {
@@ -336,11 +376,11 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
         uint8_t v = fr[64 + y];
         if (ledLit(v)) dl->AddCircleFilled(c, r + 4 * s, withAlpha(ledColor(v), 70));
         dl->AddCircleFilled(c, r, ledColor(v));
-        dl->AddCircle(c, r, hov ? IM_COL32(200, 200, 210, 255) : kPadEdge, 0, 1.2f * s);
+        dl->AddCircle(c, r, hov ? IM_COL32(240, 235, 255, 255) : kPadEdge, 0, (hov ? 2.f : 1.2f) * s);
         std::string side = y < kDrumTracks ? firstLine(st.drums[static_cast<size_t>(y)].label) : (y == T_BASS ? "Bass" : "Chord");
         if (side.size() > 5) side = side.substr(0, 5);
-        centeredText(dl, small, labelSize * 0.8f, ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r),
-                     ledLit(v) ? IM_COL32(15, 15, 15, 230) : kTextDim, side.c_str());
+        centeredText(dl, small, labelSize * 0.82f, ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r),
+                     ledLit(v) ? IM_COL32(40, 30, 50, 235) : kTextDim, side.c_str());
         if (hov) ImGui::SetTooltip("%s: %s", trackName(st, y).c_str(), ctl.editView() ? "edit this track" : "mute / unmute");
     }
 
@@ -348,14 +388,16 @@ void drawLaunchpad(App& app, GuiState& gs, float width, double now) {
     if (picker) {
         ImGui::TextColored(kAccent, "Rows 1-2: pick a style.  Rows 3-4: pick a pattern (yours are amber).");
     } else {
-        ImGui::TextColored(kLabel, "%s view.", ctl.editView() ? "EDIT" : "PERFORM");
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+        ImGui::TextColored(kLabel, "%s view:", ctl.editView() ? "EDIT" : "PERFORM");
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.45f, 0.45f, 0.5f, 1), ctl.editView()
-                                                              ? "Top two rows are the 16 steps of the selected track."
-                                                              : "Hold View to change style. Right column mutes.");
+        ImGui::TextColored(kHint, ctl.editView() ? "top two rows are the 16 steps of the selected track."
+                                                 : "hold View to change style. Right column mutes.");
+        ImGui::PopTextWrapPos();
     }
-    ImGui::TextColored(ImVec4(0.45f, 0.45f, 0.5f, 1),
-                       "Keys: Space play  Z-, drums  1-8 notes  Q-I / A-K effects (hold)");
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+    ImGui::TextColored(kHint, "Keys: Space play, Z-, drums, 1-8 notes, Q-I / A-K effects (hold)");
+    ImGui::PopTextWrapPos();
 }
 
 void drawStepPopup(App& app, GuiState& gs, int p, const Style& st) {
@@ -441,17 +483,20 @@ void drawSequencer(App& app, GuiState& gs) {
     }
     ImGui::TextColored(ImVec4(0.42f, 0.42f, 0.47f, 1), "Click a step to toggle it. Right-click for accents, rolls, notes, slides and holds.");
 
-    const float muteW = 26 * s, nameW = 112 * s, groupGap = 8 * s, cellGap = 3 * s;
+    const float muteW = 36 * s, nameW = 128 * s, groupGap = 10 * s, cellGap = 4 * s;
     const float avail = ImGui::GetContentRegionAvail().x;
     const float cell = std::max(14 * s, (avail - muteW - nameW - 16 * s - groupGap * 3 - cellGap * 15) / 16.f);
-    const float rowH = std::min(cell, 32 * s);
+    const float rowH = std::max(26 * s, std::min(cell, 38 * s));
+    const float cr = std::min(cell, rowH) * 0.34f;  // step corner radius
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImFont* small = gs.smallFont ? gs.smallFont : ImGui::GetFont();
 
     for (int t = 0; t < kTracks; ++t) {
         ImGui::PushID(t);
         const bool muted = sh.mute[t].load();
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
         if (coloredButton("M", kRed, ImVec2(muteW, rowH), muted)) sh.mute[t].store(!muted);
+        ImGui::PopStyleVar();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip(muted ? "Unmute" : "Mute");
         ImGui::SameLine(0, 6 * s);
 
@@ -462,7 +507,7 @@ void drawSequencer(App& app, GuiState& gs) {
             if (ImGui::InvisibleButton("name", ImVec2(nameW, rowH))) ctl.selectTrack(t);
             const bool hov = ImGui::IsItemHovered();
             ImVec2 b(a.x + nameW, a.y + rowH);
-            if (sel || hov) dl->AddRectFilled(a, b, sel ? IM_COL32(80, 60, 30, 255) : IM_COL32(45, 45, 54, 255), 4 * s);
+            if (sel || hov) dl->AddRectFilled(a, b, sel ? IM_COL32(86, 70, 128, 255) : IM_COL32(58, 53, 80, 255), rowH * 0.5f);
             const float th = ImGui::GetTextLineHeight();
             const std::string nm = trackName(st, t);
             dl->PushClipRect(a, b, true);
@@ -499,18 +544,18 @@ void drawSequencer(App& app, GuiState& gs) {
             ImVec2 b(a.x + cell, a.y + rowH);
             const bool head = playing && stp == step;
             ImU32 base = muted ? scaleCol(tcol, 0.45f) : tcol;
-            ImU32 col = stp % 4 == 0 ? IM_COL32(52, 52, 62, 255) : IM_COL32(40, 40, 48, 255);
+            ImU32 col = stp % 4 == 0 ? kCellBeat : kCell;
             if (on) col = kind == STEP_SOFT ? scaleCol(base, 0.5f) : base;
-            if (head) col = on ? IM_COL32(255, 245, 220, 255) : IM_COL32(85, 80, 70, 255);
+            if (head) col = on ? IM_COL32(255, 248, 235, 255) : IM_COL32(96, 88, 124, 255);
             if (kind == STEP_TIE) {
                 // A hold: a bar joining it to the previous note.
-                dl->AddRectFilled(a, b, stp % 4 == 0 ? IM_COL32(52, 52, 62, 255) : IM_COL32(40, 40, 48, 255), 3 * s);
+                dl->AddRectFilled(a, b, stp % 4 == 0 ? kCellBeat : kCell, cr);
                 dl->AddRectFilled(ImVec2(a.x - cellGap - 1, a.y + rowH * 0.32f), ImVec2(b.x, b.y - rowH * 0.32f),
-                                  head ? IM_COL32(255, 245, 220, 255) : scaleCol(base, 0.7f), 2 * s);
+                                  head ? IM_COL32(255, 248, 235, 255) : scaleCol(base, 0.7f), rowH * 0.18f);
             } else {
-                dl->AddRectFilled(a, b, col, 3 * s);
+                dl->AddRectFilled(a, b, col, cr);
             }
-            if (on && kind == STEP_ACCENT) dl->AddRectFilled(a, ImVec2(b.x, a.y + 3 * s), IM_COL32(255, 255, 255, 200), 2 * s);
+            if (on && kind == STEP_ACCENT) dl->AddCircleFilled(ImVec2(b.x - cell * 0.2f, a.y + rowH * 0.2f), 3 * s, IM_COL32(255, 255, 255, 230));
             if (on && (kind == STEP_ROLL2 || kind == STEP_ROLL3)) {
                 const int n = kind == STEP_ROLL2 ? 2 : 3;
                 for (int k = 0; k < n; ++k) {
@@ -520,7 +565,7 @@ void drawSequencer(App& app, GuiState& gs) {
             }
             if (on && (v & STEP_SLIDE))
                 dl->AddTriangleFilled(ImVec2(a.x, b.y), ImVec2(a.x + 7 * s, b.y), ImVec2(a.x, b.y - 7 * s), IM_COL32(20, 20, 20, 230));
-            if (hov) dl->AddRect(a, b, IM_COL32(220, 220, 230, 200), 3 * s, 0, 1.2f * s);
+            if (hov) dl->AddRect(a, b, IM_COL32(240, 235, 255, 220), cr, 0, 2.f * s);
             if (t >= T_BASS && on) {
                 const int deg = sh.note[p][t][stp].load();
                 std::string txt = t == T_BASS ? std::string(noteNameFor(st, degreeSemis(st, deg))) + (deg >= 7 ? "'" : "")
@@ -643,7 +688,7 @@ void drawEffects(App& app, GuiState& gs) {
     const float avail = ImGui::GetContentRegionAvail().x;
     const float gap = 6 * s;
     const float w = (avail - gap * 7) / 8.f;
-    const float h = std::min(w * 0.8f, 70 * s);
+    const float h = std::min(w * 0.85f, 86 * s);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImFont* small = gs.smallFont ? gs.smallFont : ImGui::GetFont();
     for (int pad = 0; pad < 16; ++pad) {
@@ -659,12 +704,12 @@ void drawEffects(App& app, GuiState& gs) {
         const bool hov = ImGui::IsItemHovered();
         ImVec2 b(a.x + w, a.y + h);
         const ImU32 base = guiColor(fxColor(f));
-        dl->AddRectFilled(a, b, held ? base : scaleCol(base, 0.25f), 5 * s);
-        if (hov) dl->AddRect(a, b, IM_COL32(230, 230, 240, 220), 5 * s, 0, 1.5f * s);
+        dl->AddRectFilled(a, b, held ? base : withAlpha(base, 70), 20 * s);
+        if (hov) dl->AddRect(a, b, IM_COL32(240, 235, 255, 230), 20 * s, 0, 2.f * s);
         centeredText(dl, ImGui::GetFont(), ImGui::GetFontSize(), a, ImVec2(b.x, b.y - 8 * s),
-                     held ? IM_COL32(10, 10, 10, 255) : IM_COL32(235, 235, 240, 255), f >= 0 && f < FX_COUNT ? kFxTitle[f] : "");
+                     held ? IM_COL32(40, 30, 50, 255) : IM_COL32(245, 240, 255, 255), f >= 0 && f < FX_COUNT ? kFxTitle[f] : "");
         char k[2] = {keys[pad], 0};
-        dl->AddText(small, 12 * s, ImVec2(a.x + 6 * s, b.y - 16 * s), held ? IM_COL32(20, 20, 20, 200) : IM_COL32(150, 150, 160, 200), k);
+        dl->AddText(small, 13 * s, ImVec2(a.x + 14 * s, b.y - 20 * s), held ? IM_COL32(40, 30, 50, 200) : IM_COL32(190, 180, 215, 200), k);
         ImGui::PopID();
     }
     ImGui::Spacing();
@@ -680,7 +725,7 @@ void drawStyles(App& app, GuiState& gs) {
     const float avail = ImGui::GetContentRegionAvail().x;
     const int cols = avail > 900 * s ? 4 : 3;
     const float gap = 8 * s;
-    const float w = (avail - gap * (cols - 1)) / cols, h = 74 * s;
+    const float w = (avail - gap * (cols - 1)) / cols, h = 92 * s;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     for (int i = 0; i < styleCount(); ++i) {
         const Style& o = styles()[static_cast<size_t>(i)];
@@ -691,17 +736,17 @@ void drawStyles(App& app, GuiState& gs) {
         const bool hov = ImGui::IsItemHovered();
         ImVec2 b(a.x + w, a.y + h);
         const ImU32 acc = ledColor(o.led);
-        dl->AddRectFilled(a, b, i == cur ? scaleCol(acc, 0.35f) : (hov ? IM_COL32(45, 45, 54, 255) : IM_COL32(36, 36, 44, 255)), 6 * s);
-        dl->AddRectFilled(a, ImVec2(a.x + 5 * s, b.y), acc, 6 * s, ImDrawFlags_RoundCornersLeft);
-        if (i == cur) dl->AddRect(a, b, acc, 6 * s, 0, 1.5f * s);
+        dl->AddRectFilled(a, b, i == cur ? withAlpha(acc, 70) : (hov ? IM_COL32(60, 55, 82, 255) : IM_COL32(48, 44, 66, 255)), 20 * s);
+        dl->AddCircleFilled(ImVec2(b.x - 20 * s, a.y + 20 * s), 7 * s, acc);  // colour dot
+        if (i == cur) dl->AddRect(a, b, acc, 20 * s, 0, 2.f * s);
         dl->PushClipRect(a, b, true);
-        dl->AddText(ImVec2(a.x + 14 * s, a.y + 8 * s), IM_COL32(240, 240, 245, 255), o.name.c_str());
+        dl->AddText(ImVec2(a.x + 18 * s, a.y + 10 * s), IM_COL32(245, 240, 255, 255), o.name.c_str());
         char sub[96];
         std::snprintf(sub, sizeof sub, "%.0f BPM  %s", o.bpm, o.keyName.c_str());
-        dl->AddText(ImVec2(a.x + 14 * s, a.y + 8 * s + ImGui::GetTextLineHeight()), IM_COL32(160, 160, 170, 255), sub);
+        dl->AddText(ImVec2(a.x + 18 * s, a.y + 10 * s + ImGui::GetTextLineHeight()), IM_COL32(185, 178, 210, 255), sub);
         ImFont* small = gs.smallFont ? gs.smallFont : ImGui::GetFont();
-        dl->AddText(small, 12.5f * s, ImVec2(a.x + 14 * s, a.y + 12 * s + ImGui::GetTextLineHeight() * 2), IM_COL32(130, 130, 140, 255),
-                    o.blurb.c_str(), nullptr, w - 20 * s);
+        dl->AddText(small, 13.5f * s, ImVec2(a.x + 18 * s, a.y + 16 * s + ImGui::GetTextLineHeight() * 2), IM_COL32(160, 152, 188, 255),
+                    o.blurb.c_str(), nullptr, w - 32 * s);
         dl->PopClipRect();
         ImGui::PopID();
     }
@@ -779,11 +824,11 @@ void drawPiano(App& app, GuiState& gs, int lo, int hi, float height) {
         for (int v : st.scale) if (v == pc) return true;
         return false;
     };
-    const ImU32 lit = IM_COL32(120, 220, 140, 255);
+    const ImU32 lit = IM_COL32(110, 225, 150, 255);
     for (auto& w : rects) {
         const ImVec4& r = w.second;
         const bool held = app.leadKeyHeld(w.first);
-        dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.z, r.w), held ? lit : IM_COL32(225, 225, 230, 255), 3 * s);
+        dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.z, r.w), held ? lit : IM_COL32(240, 236, 250, 255), 10 * s, ImDrawFlags_RoundCornersBottom);
         if (inKey(w.first)) dl->AddCircleFilled(ImVec2((r.x + r.z) * 0.5f, r.w - 9 * s), 3 * s, IM_COL32(255, 160, 40, 220));
         if (w.first % 12 == 0) {
             char lbl[16];
@@ -794,7 +839,7 @@ void drawPiano(App& app, GuiState& gs, int lo, int hi, float height) {
     for (auto& b : blacks) {
         const ImVec4& r = b.second;
         const bool held = app.leadKeyHeld(b.first);
-        dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.z, r.w), held ? lit : IM_COL32(30, 30, 36, 255), 2 * s);
+        dl->AddRectFilled(ImVec2(r.x, r.y), ImVec2(r.z, r.w), held ? lit : IM_COL32(48, 42, 66, 255), 7 * s, ImDrawFlags_RoundCornersBottom);
         if (inKey(b.first)) dl->AddCircleFilled(ImVec2((r.x + r.z) * 0.5f, r.w - 8 * s), 2.5f * s, IM_COL32(255, 160, 40, 220));
     }
 }
@@ -805,14 +850,12 @@ void drawInstrument(App& app, GuiState& gs) {
     MidiHub& midi = app.midi();
     const Style& st = styleOf(sh.pattern.load());
 
-    ImGui::TextColored(kHint, "Play over the beat with a second MIDI instrument (or click the keyboard below).");
-
     // Which keyboards play the lead
     auto kbs = midi.keyboards();
     int leads = 0;
     for (const auto& k : kbs) leads += (k.enabled && k.route == ROUTE_LEAD) ? 1 : 0;
     if (kbs.empty()) {
-        ImGui::TextColored(kLabel, "No MIDI keyboard plugged in. Plug one in any time and it will play this sound.");
+        ImGui::TextColored(kHint, "Plug in a second MIDI keyboard to play over the beat, or click the keys below.");
     } else {
         for (const auto& k : kbs) {
             ImGui::PushID(k.name.c_str());
@@ -828,13 +871,13 @@ void drawInstrument(App& app, GuiState& gs) {
         }
         if (leads == 0) ImGui::TextColored(kAccent, "None of your keyboards are set to play the lead synth.");
     }
-    ImGui::Spacing();
-
     // Sound
     ImGui::SeparatorText("Sound");
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14 * s, 6 * s));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10 * s, 7 * s));
     const auto& pats = leadPatches();
     std::string group;
-    const float indent = 95 * s, bw = 150 * s, maxX = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    const float indent = 100 * s, bw = 168 * s, maxX = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
     for (size_t i = 0; i < pats.size(); ++i) {
         const LeadPatch& lp = pats[i];
         if (lp.group != group) {
@@ -859,13 +902,16 @@ void drawInstrument(App& app, GuiState& gs) {
                                         ? "Mono: one note at a time, glides between held notes"
                                         : "Poly: play chords");
     }
-    ImGui::Spacing();
+    ImGui::PopStyleVar(2);
 
     // Controls
     ImGui::SeparatorText("Controls");
     float lv = sh.leadVolume.load();
-    ImGui::SetNextItemWidth(200 * s);
-    if (ImGui::SliderFloat("Volume", &lv, 0.f, 1.f, "%.2f")) sh.leadVolume.store(lv);
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("Volume %d%%", static_cast<int>(std::round(lv * 100.f)));
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(170 * s);
+    if (ImGui::SliderFloat("##leadvol", &lv, 0.f, 1.f, "")) sh.leadVolume.store(lv);
     ImGui::SameLine(0, 24 * s);
     ImGui::TextUnformatted("Octave");
     ImGui::SameLine();
@@ -881,10 +927,11 @@ void drawInstrument(App& app, GuiState& gs) {
         ImGui::SetTooltip("Wrong notes move to the nearest note in %s, so anything you play fits.\nThe orange dots on the keyboard show the notes in the key.", st.keyName.c_str());
     ImGui::SameLine();
     ImGui::TextColored(kHint, "(%s)", st.keyName.c_str());
-    ImGui::TextColored(kHint, "Sustain pedal, pitch bend (+/-2) and mod wheel (vibrato) work too.");
-    ImGui::Spacing();
+    ImGui::SameLine(0, 24 * s);
+    ImGui::TextColored(kHint, "(?)");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Velocity, sustain pedal, pitch bend (+/-2) and mod wheel (vibrato) all work.");
 
-    const float ph = std::max(90 * s, std::min(150 * s, ImGui::GetContentRegionAvail().y - 8 * s));
+    const float ph = std::max(120 * s, std::min(160 * s, ImGui::GetContentRegionAvail().y - 4 * s));
     drawPiano(app, gs, 48, 84, ph);
 }
 
@@ -989,39 +1036,54 @@ void handleKeys(App& app, GuiState& gs) {
 void setupGuiStyle(float scale) {
     ImGuiStyle& st = ImGui::GetStyle();
     ImGui::StyleColorsDark(&st);
-    st.WindowRounding = 0.f;
-    st.ChildRounding = 8.f;
-    st.FrameRounding = 5.f;
-    st.PopupRounding = 6.f;
-    st.GrabRounding = 4.f;
-    st.TabRounding = 5.f;
-    st.FramePadding = ImVec2(10, 6);
-    st.ItemSpacing = ImVec2(8, 7);
-    st.WindowPadding = ImVec2(14, 12);
-    st.GrabMinSize = 12.f;
+    // Rounded and roomy: pill buttons/sliders, round checkboxes, soft panels.
+    st.WindowRounding = 20.f;  // dialogs (the main window turns this off)
+    st.ChildRounding = 22.f;
+    st.FrameRounding = 18.f;
+    st.PopupRounding = 18.f;
+    st.GrabRounding = 18.f;
+    st.TabRounding = 14.f;
+    st.ScrollbarRounding = 12.f;
+    st.FramePadding = ImVec2(16, 9);
+    st.ItemSpacing = ImVec2(10, 10);
+    st.ItemInnerSpacing = ImVec2(8, 6);
+    st.WindowPadding = ImVec2(18, 16);
+    st.GrabMinSize = 22.f;
+    st.ScrollbarSize = 16.f;
+    st.FrameBorderSize = 0.f;
+    st.ChildBorderSize = 0.f;
+    st.PopupBorderSize = 0.f;
+    st.WindowBorderSize = 0.f;
+    st.SeparatorTextBorderSize = 2.f;
+    st.SeparatorTextPadding = ImVec2(14, 4);
     ImVec4* c = st.Colors;
-    c[ImGuiCol_WindowBg] = ImGui::ColorConvertU32ToFloat4(kBg);
-    c[ImGuiCol_ChildBg] = ImGui::ColorConvertU32ToFloat4(kPanel);
-    c[ImGuiCol_PopupBg] = ImVec4(0.12f, 0.12f, 0.15f, 0.98f);
-    c[ImGuiCol_Border] = ImVec4(0.25f, 0.25f, 0.30f, 0.6f);
-    c[ImGuiCol_FrameBg] = ImVec4(0.17f, 0.17f, 0.21f, 1.f);
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.23f, 0.23f, 0.28f, 1.f);
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.28f, 0.28f, 0.34f, 1.f);
-    c[ImGuiCol_Button] = ImVec4(0.20f, 0.20f, 0.24f, 1.f);
-    c[ImGuiCol_ButtonHovered] = ImVec4(0.27f, 0.27f, 0.32f, 1.f);
+    auto u = [](ImU32 v) { return ImGui::ColorConvertU32ToFloat4(v); };
+    c[ImGuiCol_WindowBg] = u(kBg);
+    c[ImGuiCol_ChildBg] = u(kPanel);
+    c[ImGuiCol_PopupBg] = ImVec4(0.18f, 0.16f, 0.25f, 0.99f);
+    c[ImGuiCol_TitleBg] = ImVec4(0.30f, 0.26f, 0.44f, 1.f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.36f, 0.30f, 0.54f, 1.f);
+    c[ImGuiCol_TitleBgCollapsed] = ImVec4(0.30f, 0.26f, 0.44f, 1.f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.08f, 0.06f, 0.12f, 0.6f);
+    c[ImGuiCol_Border] = ImVec4(0.40f, 0.36f, 0.52f, 0.5f);
+    c[ImGuiCol_FrameBg] = ImVec4(0.25f, 0.23f, 0.34f, 1.f);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.32f, 0.29f, 0.44f, 1.f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.38f, 0.34f, 0.52f, 1.f);
+    c[ImGuiCol_Button] = ImVec4(0.25f, 0.23f, 0.34f, 1.f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.32f, 0.29f, 0.44f, 1.f);
     c[ImGuiCol_ButtonActive] = kAccent;
     c[ImGuiCol_SliderGrab] = kAccent;
-    c[ImGuiCol_SliderGrabActive] = ImVec4(1.f, 0.75f, 0.3f, 1.f);
+    c[ImGuiCol_SliderGrabActive] = ImVec4(1.f, 0.78f, 0.58f, 1.f);
     c[ImGuiCol_CheckMark] = kAccent;
-    c[ImGuiCol_Header] = ImVec4(0.30f, 0.24f, 0.14f, 1.f);
-    c[ImGuiCol_HeaderHovered] = ImVec4(0.38f, 0.30f, 0.16f, 1.f);
-    c[ImGuiCol_HeaderActive] = ImVec4(0.45f, 0.34f, 0.16f, 1.f);
-    c[ImGuiCol_Tab] = ImVec4(0.17f, 0.17f, 0.21f, 1.f);
-    c[ImGuiCol_TabHovered] = ImVec4(0.38f, 0.30f, 0.16f, 1.f);
-    c[ImGuiCol_TabSelected] = ImVec4(0.45f, 0.33f, 0.12f, 1.f);
-    c[ImGuiCol_TabSelectedOverline] = kAccent;
-    c[ImGuiCol_Separator] = ImVec4(0.30f, 0.30f, 0.36f, 1.f);
-    c[ImGuiCol_Text] = ImVec4(0.92f, 0.92f, 0.94f, 1.f);
+    c[ImGuiCol_Header] = ImVec4(0.36f, 0.30f, 0.54f, 1.f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(0.42f, 0.36f, 0.62f, 1.f);
+    c[ImGuiCol_HeaderActive] = ImVec4(0.48f, 0.40f, 0.70f, 1.f);
+    c[ImGuiCol_Separator] = ImVec4(0.34f, 0.31f, 0.46f, 1.f);
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.34f, 0.31f, 0.46f, 1.f);
+    c[ImGuiCol_Text] = ImVec4(0.95f, 0.93f, 0.99f, 1.f);
+    c[ImGuiCol_TextDisabled] = ImVec4(0.55f, 0.52f, 0.64f, 1.f);
+    c[ImGuiCol_TextSelectedBg] = ImVec4(0.72f, 0.62f, 1.00f, 0.4f);
     st.ScaleAllSizes(scale);
 }
 
@@ -1032,9 +1094,11 @@ void drawGui(App& app, GuiState& gs, double now) {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos);
     ImGui::SetNextWindowSize(vp->WorkSize);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
     ImGui::Begin("LP-DNB", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
+    ImGui::PopStyleVar();
 
     drawTopBar(app, gs, now);
     ImGui::Spacing();
@@ -1048,30 +1112,33 @@ void drawGui(App& app, GuiState& gs, double now) {
     ImGui::SameLine();
 
     ImGui::BeginGroup();
-    const float logH = ImGui::GetTextLineHeightWithSpacing() * 4 + 20 * s;
+    const float logH = ImGui::GetTextLineHeightWithSpacing() * 3 + ImGui::GetStyle().WindowPadding.y * 2;
     ImGui::BeginChild("right", ImVec2(0, ImGui::GetContentRegionAvail().y - logH - ImGui::GetStyle().ItemSpacing.y),
                       ImGuiChildFlags_AlwaysUseWindowPadding);
-    if (ImGui::BeginTabBar("tabs")) {
-        const char* names[5] = {"Sequencer", "Effects", "Instrument", "Styles", "Devices"};
-        for (int i = 0; i < 5; ++i) {
-            if (ImGui::BeginTabItem(names[i], nullptr, gs.forceTab == i ? ImGuiTabItemFlags_SetSelected : 0)) {
-                switch (i) {
-                    case 0: drawSequencer(app, gs); break;
-                    case 1: drawEffects(app, gs); break;
-                    case 2: drawInstrument(app, gs); break;
-                    case 3: drawStyles(app, gs); break;
-                    default: drawDevices(app, gs, now); break;
-                }
-                ImGui::EndTabItem();
-            }
-        }
-        ImGui::EndTabBar();
-    }
+    // Pill-shaped tabs.
+    if (gs.forceTab >= 0) gs.tab = gs.forceTab;
     gs.forceTab = -1;
+    {
+        const char* names[5] = {"Sequencer", "Effects", "Instrument", "Styles", "Devices"};
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(20 * s, 10 * s));
+        for (int i = 0; i < 5; ++i) {
+            if (i) ImGui::SameLine(0, 8 * s);
+            if (coloredButton(names[i], kLilac, ImVec2(0, 0), gs.tab == i)) gs.tab = i;
+        }
+        ImGui::PopStyleVar();
+        ImGui::Dummy(ImVec2(0, 4 * s));
+    }
+    switch (gs.tab) {
+        case 0: drawSequencer(app, gs); break;
+        case 1: drawEffects(app, gs); break;
+        case 2: drawInstrument(app, gs); break;
+        case 3: drawStyles(app, gs); break;
+        default: drawDevices(app, gs, now); break;
+    }
     ImGui::EndChild();
 
-    ImGui::BeginChild("log", ImVec2(0, logH), ImGuiChildFlags_AlwaysUseWindowPadding);
-    for (const auto& l : Log::get().tail(4)) ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.66f, 1), "%s", l.c_str());
+    ImGui::BeginChild("log", ImVec2(0, logH), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoScrollbar);
+    for (const auto& l : Log::get().tail(3)) ImGui::TextColored(kHint, "%s", l.c_str());
     ImGui::EndChild();
     ImGui::EndGroup();
 

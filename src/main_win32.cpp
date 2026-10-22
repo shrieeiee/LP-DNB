@@ -8,6 +8,7 @@
 #include <algorithm>
 
 #include "app.h"
+#include "fonts_data.h"
 #include "common.h"
 #include "gui.h"
 #include "imgui.h"
@@ -80,8 +81,8 @@ LRESULT WINAPI wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         case WM_GETMINMAXINFO: {
             auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
-            mmi->ptMinTrackSize.x = 900;
-            mmi->ptMinTrackSize.y = 600;
+            mmi->ptMinTrackSize.x = 1000;
+            mmi->ptMinTrackSize.y = 680;
             return 0;
         }
         case WM_DPICHANGED: {
@@ -102,11 +103,19 @@ LRESULT WINAPI wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-bool fileExists(const char* path) { return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES; }
 
 }  // namespace
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
+    // This is a windowed app. If it was ever built or started with its own
+    // console window, close that window (but leave a terminal we were run from alone).
+    if (HWND con = GetConsoleWindow()) {
+        DWORD procs[2];
+        if (GetConsoleProcessList(procs, 2) <= 1) {
+            ShowWindow(con, SW_HIDE);
+            FreeConsole();
+        }
+    }
     ImGui_ImplWin32_EnableDpiAwareness();
     const float dpi = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
 
@@ -117,8 +126,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
 
     RECT work{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-    const int w = std::min(static_cast<int>(1400 * dpi), static_cast<int>(work.right - work.left));
-    const int h = std::min(static_cast<int>(880 * dpi), static_cast<int>(work.bottom - work.top));
+    const int w = std::min(static_cast<int>(1440 * dpi), static_cast<int>(work.right - work.left));
+    const int h = std::min(static_cast<int>(900 * dpi), static_cast<int>(work.bottom - work.top));
     HWND hwnd = CreateWindowW(wc.lpszClassName, L"LP-DNB  \u2013  drum & bass for Launchpad Mini", WS_OVERLAPPEDWINDOW,
                               work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2,
                               w, h, nullptr, nullptr, wc.hInstance, nullptr);
@@ -141,16 +150,12 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
     gs.scale = dpi;
     dnb::setupGuiStyle(dpi);
 
-    const char* body = "C:\\Windows\\Fonts\\segoeui.ttf";
-    const char* semibold = "C:\\Windows\\Fonts\\seguisb.ttf";
-    if (fileExists(body)) {
-        io.Fonts->AddFontFromFileTTF(body, 17.f * dpi);
-        gs.smallFont = io.Fonts->AddFontFromFileTTF(fileExists(semibold) ? semibold : body, 13.f * dpi);
-    } else {
-        ImFontConfig cfg;
-        cfg.SizePixels = 13.f * dpi;
-        io.Fonts->AddFontDefault(&cfg);
-    }
+    // Built-in rounded font (Nunito): normal text, pad labels, and the big Play button.
+    ImFontConfig cfg;
+    cfg.FontDataOwnedByAtlas = false;  // the data lives in the program, ImGui mustn't free it
+    io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(dnb::kFontBody), static_cast<int>(dnb::kFontBodySize), 19.f * dpi, &cfg);
+    gs.smallFont = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(dnb::kFontBold), static_cast<int>(dnb::kFontBoldSize), 14.5f * dpi, &cfg);
+    gs.bigFont = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(dnb::kFontBold), static_cast<int>(dnb::kFontBoldSize), 24.f * dpi, &cfg);
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(gDevice, gContext);

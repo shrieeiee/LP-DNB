@@ -11,6 +11,8 @@ class App;
 struct GuiState {
     float scale = 1.f;          // DPI scale
     ImFont* smallFont = nullptr;  // pad labels; falls back to the default font
+    ImFont* bigFont = nullptr;    // Play button
+    int tab = 0;                  // which page is showing on the right
     bool keyHeld[64] = {};
     int popupTrack = -1, popupStep = -1;  // step being edited in the right-click menu
     int forceTab = -1;  // select a tab programmatically (0..4), then resets

@@ -28,6 +28,7 @@ if(WIN32)
   add_executable(lp-dnb WIN32
     ${CORE_SOURCES}
     src/gui.cpp
+    src/fonts_data.cpp
     src/main_win32.cpp
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
@@ -37,6 +38,12 @@ if(WIN32)
     ${IMGUI_DIR}/backends/imgui_impl_dx11.cpp)
   target_include_directories(lp-dnb PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
   target_link_libraries(lp-dnb PRIVATE d3d11 d3dcompiler dxgi dwmapi)
+  # A windowed app: no console window (MSVC needs the entry point spelled out with WinMain).
+  if(MSVC)
+    target_link_options(lp-dnb PRIVATE /SUBSYSTEM:WINDOWS)
+  else()
+    target_link_options(lp-dnb PRIVATE -mwindows)
+  endif()
 else()
   # macOS / Linux: console version (same synth and light show, no window).
   add_executable(lp-dnb ${CORE_SOURCES} src/main_console.cpp)
