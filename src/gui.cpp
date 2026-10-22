@@ -9,6 +9,7 @@
 #include <commdlg.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#undef small  // the Windows headers #define small as char; we use it as a name
 #endif
 
 #include <algorithm>
