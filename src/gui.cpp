@@ -1644,19 +1644,59 @@ void linkText(const char* label, const char* url) {
     if (ImGui::IsItemClicked()) openUrl(url);
 }
 
+// THIRD-PARTY-NOTICES.txt next to the program ("" if it isn't there).
+std::string noticesFile() {
+#ifdef _WIN32
+    wchar_t exe[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return "";
+    const std::filesystem::path p = std::filesystem::path(exe).parent_path() / L"THIRD-PARTY-NOTICES.txt";
+    std::error_code ec;
+    return std::filesystem::exists(p, ec) ? toUtf8(p.wstring()) : "";
+#else
+    return "";
+#endif
+}
+
+#ifndef LPDNB_COMMIT
+#define LPDNB_COMMIT "dev"
+#endif
+
 void drawAbout(App& app, GuiState& gs) {
     (void)app;
     const float s = gs.scale;
     ImFont* big = gs.bigFont ? gs.bigFont : ImGui::GetFont();
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + stableAvailX());
+
+#ifdef LP_TENORI
+    const char* name = "lp-tenori";
+    const char* what = "A Tenori-on style sequencer for the original Novation Launchpad Mini: eight layers, each with "
+                       "its own instrument, playing in Score, Bounce, Path or Push mode, with ripples of light for every note.";
+    const char* sister = "Part of LP-DNB, alongside the lp-dnb groovebox (same sound engine, styles and effects).";
+#else
+    const char* name = "LP-DNB";
+    const char* what = "A groovebox for the original Novation Launchpad Mini: 12 styles and 96 patterns, synth and "
+                       "sampled drums, a lead synth for a second keyboard, songs, recording and MIDI export.";
+    const char* sister = "Comes with lp-tenori, a Tenori-on style sequencer on the same sound engine.";
+#endif
     ImGui::PushFont(big);
-    ImGui::Text("LP-DNB %s", kVersion);
+    ImGui::Text("%s %s", name, kVersion);
     ImGui::PopFont();
-    ImGui::TextColored(kHint, "A groovebox for the original Novation Launchpad Mini: 12 styles, synth and sampled drums,");
-    ImGui::TextColored(kHint, "a lead synth for a second keyboard, songs, recording and MIDI export.");
+    ImGui::SameLine(0, 10 * s);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(kHint, "build %s", LPDNB_COMMIT);
+    ImGui::TextWrapped("%s", what);
+    ImGui::TextColored(kHint, "%s", sister);
     ImGui::Spacing();
-    ImGui::TextUnformatted("Made by shrieeiee, written with Claude (Anthropic). MIT licence.");
+    ImGui::TextWrapped("Made by shrieeiee, written with Claude (Anthropic). MIT licence.");
     linkText("github.com/shrieeiee/LP-DNB", "https://github.com/shrieeiee/LP-DNB");
-    ImGui::TextColored(kHint, "Not made by or affiliated with Novation. Launchpad is a trademark of Focusrite Audio Engineering Ltd.");
+    ImGui::SameLine(0, 18 * s);
+    linkText("Download the latest version", "https://github.com/shrieeiee/LP-DNB/releases/latest");
+    ImGui::SameLine(0, 18 * s);
+    linkText("Report a problem", "https://github.com/shrieeiee/LP-DNB/issues");
+    ImGui::Spacing();
+    ImGui::TextColored(kHint, "Not made by or affiliated with Novation. Launchpad is a trademark of Focusrite Audio "
+                              "Engineering Ltd.");
 
     ImGui::SeparatorText("Built with");
     struct Credit { const char* name; const char* who; const char* licence; const char* url; };
@@ -1668,25 +1708,54 @@ void drawAbout(App& app, GuiState& gs) {
         {"Nunito font", "Vernon Adams, Jacques Le Bailly, Manvel Shmavonyan, Alexei Vanyashin", "SIL Open Font License 1.1",
          "https://github.com/googlefonts/nunito"},
     };
-    for (const Credit& c : credits) {
-        ImGui::PushID(c.name);
-        linkText(c.name, c.url);
-        ImGui::SameLine();
-        ImGui::TextColored(kHint, " %s  -  %s", c.who, c.licence);
-        ImGui::PopID();
+    if (ImGui::BeginTable("credits", 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX)) {
+        ImGui::TableSetupColumn("what", ImGuiTableColumnFlags_WidthStretch, 1.1f);
+        ImGui::TableSetupColumn("who", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+        ImGui::TableSetupColumn("licence", ImGuiTableColumnFlags_WidthStretch, 0.8f);
+        for (const Credit& c : credits) {
+            ImGui::TableNextRow();
+            ImGui::PushID(c.name);
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushTextWrapPos(0.f);  // wrap at the column edge
+            linkText(c.name, c.url);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextColored(kHint, "%s", c.who);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextColored(kHint, "%s", c.licence);
+            ImGui::PopTextWrapPos();
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
     }
+#ifndef LP_TENORI
     ImGui::Spacing();
-    ImGui::TextColored(kHint, "The built-in patterns follow well-known grooves; the articles they were checked against are listed in the README.");
+    ImGui::TextColored(kHint, "The built-in patterns follow well-known grooves; the articles they were checked against are "
+                              "listed in the README.");
+#endif
 
     ImGui::SeparatorText("Licences");
-    ImGui::TextColored(kHint, "The full licence texts (also in THIRD-PARTY-NOTICES.txt next to the program):");
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(kWell));
-    ImGui::BeginChild("notices", ImVec2(0, std::max(160 * s, ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_AlwaysUseWindowPadding);
-    ImGui::PushFont(gs.smallFont ? gs.smallFont : ImGui::GetFont());
-    ImGui::TextUnformatted(kThirdPartyNotices);
-    ImGui::PopFont();
-    ImGui::EndChild();
-    ImGui::PopStyleColor();
+    ImGui::TextColored(kHint, "LP-DNB is MIT licensed. The full licence texts of everything above are built into the "
+                              "program and in THIRD-PARTY-NOTICES.txt next to it.");
+    const std::string file = noticesFile();
+    if (!file.empty()) {
+        if (ImGui::Button("Open THIRD-PARTY-NOTICES.txt")) openInExplorer(file);
+        ImGui::SameLine();
+    }
+    static bool showAll = false;
+    if (ImGui::Button(showAll ? "Hide the licence texts" : "Show the licence texts here")) showAll = !showAll;
+    ImGui::PopTextWrapPos();
+    if (showAll) {
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(kWell));
+        ImGui::BeginChild("notices", ImVec2(0, 420 * s), ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::PushFont(gs.smallFont ? gs.smallFont : ImGui::GetFont());
+        ImGui::PushTextWrapPos(0.f);
+        ImGui::TextUnformatted(kThirdPartyNotices);
+        ImGui::PopTextWrapPos();
+        ImGui::PopFont();
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+    }
 }
 
 void handleKeys(App& app, GuiState& gs) {

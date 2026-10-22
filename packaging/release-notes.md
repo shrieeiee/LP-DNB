@@ -1,5 +1,9 @@
 **Download `LP-DNB-windows.zip` below**, unzip it anywhere and double-click `lp-dnb.exe` or `lp-tenori.exe`. Nothing to install (64-bit Windows 10/11). The programs aren't signed, so the first time Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
 
+## What's new in 1.3.1
+- **About page fixed** in both programs: lp-tenori's now says it's lp-tenori (not the groovebox), the version shows which build it is, all text wraps to the window, the credits are a tidy table, and the licence texts open at a readable size (or open `THIRD-PARTY-NOTICES.txt` directly). Links to download the latest version and to report a problem.
+
+## From 1.3.0
 ## New: lp-tenori
 A Tenori-on style sequencer for the Launchpad Mini, on LP-DNB's sound engine.
 
