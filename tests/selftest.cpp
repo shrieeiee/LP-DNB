@@ -313,6 +313,31 @@ static void testScheduledNotes() {
     vc.run(48000 / 2);
     const double alone = rms(vc.out, 12000, 18000);
     CHECK(heldOn > alone * 2.0 + 1e-4, "a newer lead note was cut off by an older note's release (%.4f vs %.4f)", heldOn, alone);
+
+    // Layer synths are separate: two mono sounds on two synths both play at once
+    // (one shared mono synth would let the second note steal the first).
+    int mono = -1;
+    for (size_t i = 0; i < leadPatches().size(); ++i)
+        if (leadPatches()[i].kind == LeadPatch::MONO) { mono = static_cast<int>(i); break; }
+    CHECK(mono >= 0, "no mono lead patch");
+    for (int k : {3, 4}) {
+        Cmd c;
+        c.type = Cmd::SynthPatch; c.a = k; c.b = mono; c.t = vc.vt;
+        sh->cmds.push(c);
+    }
+    vc.run(48000 * 2);
+    sh->cmds.push(noteCmd(kSynthSlot0 + 3, 48, 1.f, 1.f, vc.vt));
+    vc.out.clear();
+    vc.run(48000 / 2);
+    const double one = rms(vc.out, 4800, 14400);
+    vc.run(48000 * 2);
+    sh->cmds.push(noteCmd(kSynthSlot0 + 3, 48, 1.f, 1.f, vc.vt));
+    sh->cmds.push(noteCmd(kSynthSlot0 + 4, 55, 1.f, 1.f, vc.vt));
+    vc.out.clear();
+    vc.run(48000 / 2);
+    const double two = rms(vc.out, 4800, 14400);
+    CHECK(one > 0.01, "layer synth didn't sound (rms %.4f)", one);
+    CHECK(two > one * 1.2, "two layer synths should sound together (%.4f vs %.4f alone)", two, one);
 }
 
 static int hitsDuring(Shared& sh, Engine& e, Tenori& t, int slot, int steps) {
@@ -382,7 +407,8 @@ static void testTenori() {
         a.layer(4).ball[5] = 2;
         a.layer(6).path = {{1, 2}, {7, 7}, {0, 0}};
         a.layer(5).muted = true;
-        a.setLeadPatch(2);
+        a.setPatch(0, 2);
+        a.setPatch(7, 9);
         const std::string text = a.serialize();
         Tenori b(*sh);
         CHECK(b.load(text), "tenori file didn't load");

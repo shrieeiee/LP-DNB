@@ -1,4 +1,6 @@
 // lp-dnb Windows GUI: Win32 window + Direct3D 11 + Dear ImGui.
+// Built with LP_TENORI defined it's lp-tenori's window instead: the same window,
+// with the Tenori-on sequencer driving the Launchpad and its own contents.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -9,6 +11,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <functional>
 #include <ctime>
 #include <filesystem>
 #include <string>
@@ -26,6 +29,10 @@
 #include "imgui_impl_win32.h"
 #include "log.h"
 #include "storage.h"
+#ifdef LP_TENORI
+#include "tenori.h"
+#include "tenori_gui.h"
+#endif
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -38,6 +45,11 @@ ID3D11RenderTargetView* gRtv = nullptr;
 UINT gResizeW = 0, gResizeH = 0;
 bool gOccluded = false;
 std::vector<std::string>* gDropped = nullptr;  // files dragged onto the window
+// While Windows runs its own modal loop (dragging or resizing the window, a file
+// dialog) our main loop stops. A timer keeps MIDI, the lights and lp-tenori's
+// sequencer going meanwhile.
+std::function<void(double)> gTick;
+double gLastTick = 0.0;
 float* gDropXY = nullptr;
 
 void createRenderTarget() {
@@ -100,7 +112,11 @@ void watchdog() {
         if (reported) continue;
         reported = true;
         try {
+#ifdef LP_TENORI
+            const auto path = std::filesystem::u8path(dnb::dataFilePath()).parent_path() / "lp-tenori-freeze-log.txt";
+#else
             const auto path = std::filesystem::u8path(dnb::dataFilePath()).parent_path() / "lp-dnb-freeze-log.txt";
+#endif
             std::filesystem::create_directories(path.parent_path());
             if (FILE* f = _wfopen(path.wstring().c_str(), L"a")) {
                 std::fprintf(f, "%s  window stopped updating while: %s (running %.0f s)\n", dnb::timeStamp().c_str(),
@@ -150,6 +166,15 @@ LRESULT WINAPI wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             DragFinish(drop);
             return 0;
         }
+        case WM_TIMER:
+            if (wParam == 1 && gTick) {
+                const double now = dnb::monotonicSec();
+                if (now - gLastTick > 0.02) {  // only when the main loop isn't running
+                    gLastTick = now;
+                    gTick(now);
+                }
+            }
+            return 0;
         case WM_SYSCOMMAND:
             if ((wParam & 0xfff0) == SC_KEYMENU) return 0;  // Alt doesn't open a menu
             break;
@@ -182,8 +207,15 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
     ImGui_ImplWin32_EnableDpiAwareness();
     const float dpi = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
 
+#ifdef LP_TENORI
+    const wchar_t* kClass = L"LP-TENORI";
+    const wchar_t* kTitle = L"LP-TENORI  \u2013  Tenori-on style sequencer for Launchpad Mini";
+#else
+    const wchar_t* kClass = L"LP-DNB";
+    const wchar_t* kTitle = L"LP-DNB  \u2013  groovebox for Launchpad Mini";
+#endif
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wndProc, 0, 0, hInst, nullptr, LoadCursor(nullptr, IDC_ARROW),
-                   nullptr, nullptr, L"LP-DNB", nullptr};
+                   nullptr, nullptr, kClass, nullptr};
     wc.hIcon = static_cast<HICON>(LoadImageW(hInst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
                                              GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
     wc.hIconSm = static_cast<HICON>(LoadImageW(hInst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
@@ -195,13 +227,13 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const int w = std::min(static_cast<int>(1440 * dpi), static_cast<int>(work.right - work.left));
     const int h = std::min(static_cast<int>(900 * dpi), static_cast<int>(work.bottom - work.top));
-    HWND hwnd = CreateWindowW(wc.lpszClassName, L"LP-DNB  \u2013  groovebox for Launchpad Mini", WS_OVERLAPPEDWINDOW,
+    HWND hwnd = CreateWindowW(wc.lpszClassName, kTitle, WS_OVERLAPPEDWINDOW,
                               work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2,
                               w, h, nullptr, nullptr, wc.hInstance, nullptr);
 
     if (!createDevice(hwnd)) {
         cleanupDevice();
-        MessageBoxW(nullptr, L"Couldn't start Direct3D 11.", L"LP-DNB", MB_ICONERROR);
+        MessageBoxW(nullptr, L"Couldn't start Direct3D 11.", kClass, MB_ICONERROR);
         UnregisterClassW(wc.lpszClassName, wc.hInstance);
         return 1;
     }
@@ -232,6 +264,15 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
     ImGui_ImplDX11_Init(gDevice, gContext);
 
     dnb::App app;
+#ifdef LP_TENORI
+    app.setAutosave(false);  // leave lp-dnb's own save file alone
+    dnb::Tenori tenori(app.shared());
+    tenori.loadFile();
+    app.setSurface(&tenori);
+#endif
+
+    gTick = [&app](double now) { app.tick(now); };
+    SetTimer(hwnd, 1, 10, nullptr);
 
     bool done = false;
     double frameStart = dnb::monotonicSec();
@@ -248,6 +289,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
 
         // MIDI, hot-plug and Launchpad lights keep running even when minimised.
         const double now = dnb::monotonicSec();
+        gLastTick = now;
         app.tick(now);
 
         if ((gOccluded && gSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) || IsIconic(hwnd)) {
@@ -269,7 +311,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
         ImGui::NewFrame();
         gs.dropX = dropXY[0];
         gs.dropY = dropXY[1];
+#ifdef LP_TENORI
+        dnb::drawTenoriGui(app, tenori, gs, now);
+#else
         dnb::drawGui(app, gs, now);
+#endif
         ImGui::Render();
 
         const float clear[4] = {0.07f, 0.07f, 0.086f, 1.f};
@@ -296,6 +342,12 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
         frameStart = std::max(target, dnb::monotonicSec() - 0.05);
     }
 
+    KillTimer(hwnd, 1);
+    gTick = nullptr;
+#ifdef LP_TENORI
+    tenori.saveIfChanged();
+    app.setSurface(nullptr);
+#endif
     gWatchQuit = true;
     watch.join();
     timeEndPeriod(1);

@@ -600,6 +600,12 @@ struct LeadSynth {
         monoSus = false;
     }
 
+    bool idle() const {
+        if (mono.gate || mono.amp > 1e-5f) return false;
+        for (const auto& v : poly) if (v.active) return false;
+        return true;
+    }
+
     void tick(float sr, float beatHz, Rng& rng, float& L, float& R) {
         advPhase(vibPh, 5.5f / sr);
         const float semis = bend + mod * 0.35f * std::sin(kTwoPi * vibPh);
@@ -631,6 +637,8 @@ struct Engine::Impl {
     uint32_t bassGen = 0;       // bumps on every bass note
     uint32_t leadGen[128] = {}; // bumps on every lead note, per MIDI note
     LeadSynth lead;
+    LeadSynth synths[kSynths];  // lp-tenori's layer instruments
+    uint32_t synthGen[kSynths][128] = {};
     SirenVoice siren;
     RiserVoice riser;
     HornVoice horn;
@@ -848,6 +856,9 @@ struct Engine::Impl {
             if (bassGen == r.gen && liveCount == 0 && !seqBassActive) bass.noteOff();
         } else if (r.slot == kLeadSlot) {
             if (r.note >= 0 && r.note < 128 && leadGen[r.note] == r.gen) lead.noteOff(r.note);
+        } else if (r.slot >= kSynthSlot0 && r.slot < kSynthSlot0 + kSynths) {
+            const int k = r.slot - kSynthSlot0;
+            if (r.note >= 0 && r.note < 128 && synthGen[k][r.note] == r.gen) synths[k].noteOff(r.note);
         }
     }
     void playNote(int slot, int pitch, float vel, float gateSec) {
@@ -874,6 +885,13 @@ struct Engine::Impl {
             sh.leadNote.store(pitch, std::memory_order_relaxed);
             hit(kLeadSlot);
             addRelease(gate, kLeadSlot, pitch, leadGen[pitch]);
+        } else if (slot >= kSynthSlot0 && slot < kSynthSlot0 + kSynths) {
+            if (!audible(kLeadSlot) || pitch < 0 || pitch > 127) return;
+            const int k = slot - kSynthSlot0;
+            synths[k].noteOn(style(), pitch, std::max(1, std::min(127, static_cast<int>(std::lround(vel * 100.f)))));
+            ++synthGen[k][pitch];
+            hit(kLeadSlot);
+            addRelease(gate, slot, pitch, synthGen[k][pitch]);
         }
     }
 
@@ -1230,6 +1248,13 @@ struct Engine::Impl {
                     else ++i;
                 break;
             case Cmd::Note: playNote(c.a, c.b, c.f, c.g); break;
+            case Cmd::SynthPatch:
+                if (c.a >= 0 && c.a < kSynths) {
+                    LeadSynth& sy = synths[c.a];
+                    const int p = std::max(0, std::min(c.b, static_cast<int>(leadPatches().size()) - 1));
+                    if (p != sy.patch) { sy.allOff(); sy.patch = p; }
+                }
+                break;
             case Cmd::FxOn: fxOn(c.a); break;
             case Cmd::FxOff: fxOff(c.a); break;
             case Cmd::SetSample:
@@ -1391,6 +1416,31 @@ struct Engine::Impl {
             }
             const float leadChorus = lp.kind == LeadPatch::POLY ? lp.poly.chorus : 0.f;
 
+            // --- layer synths (lp-tenori): through the Lead channel, each with its
+            // own sound's chorus / reverb / delay amounts.
+            float yL = 0.f, yR = 0.f, ycL = 0.f, ycR = 0.f, yvL = 0.f, yvR = 0.f, yd = 0.f;
+            for (auto& sy : synths) {
+                if (sy.idle()) continue;
+                float a = 0.f, b = 0.f;
+                sy.tick(sr, beatHz, rng, a, b);
+                const LeadPatch& p = sy.p();
+                const float ch = p.kind == LeadPatch::POLY ? p.poly.chorus : 0.f;
+                yL += a; yR += b;
+                ycL += a * ch; ycR += b * ch;
+                yvL += a * p.verb; yvR += b * p.verb;
+                yd += 0.5f * (a + b) * p.delay;
+            }
+            {
+                ChannelMix& lm = mix(kLeadSlot);
+                float gl, gr;
+                panGains(lm.pan.load(), gl, gr);
+                const float g = 1.2f * lm.volume.load() * (1.f - 0.25f * (1.f - duck));
+                yL *= g * gl; yR *= g * gr;
+                ycL *= g * gl; ycR *= g * gr;
+                yvL *= g * gl; yvR *= g * gr;
+                yd *= g;
+            }
+
             // --- FX sounds (mono, centred)
             const float sirenOut = siren.tick(sr), hornOut = horn.tick(sr);
             const float laserOut = laser.tick(sr, spb / 2.0, static_cast<double>(sampleCount));
@@ -1399,15 +1449,16 @@ struct Engine::Impl {
             // --- chorus send (chords / pads / keys)
             float chL, chR;
             const float chSend = cd.chorus * chorusAmt;
-            chorus.tick(cL * duck * chSend + lL * leadChorus * chorusAmt, cR * duck * chSend + lR * leadChorus * chorusAmt, chL, chR);
+            chorus.tick(cL * duck * chSend + (lL * leadChorus + ycL) * chorusAmt, cR * duck * chSend + (lR * leadChorus + ycR) * chorusAmt, chL, chR);
 
             const float trim = st.trim;
-            float xL = (dL * 0.85f + mL) * trim + lL + fxs + chL * 0.8f;
-            float xR = (dR * 0.85f + mR) * trim + lR + fxs + chR * 0.8f;
-            const float auxRevL = revL * 0.6f * trim + cL * (cd.verb + cmx.reverb.load()) + bL * bmx.reverb.load() + lL * (lp.verb + mix(kLeadSlot).reverb.load());
-            const float auxRevR = revR * 0.6f * trim + cR * (cd.verb + cmx.reverb.load()) + bR * bmx.reverb.load() + lR * (lp.verb + mix(kLeadSlot).reverb.load());
+            float xL = (dL * 0.85f + mL) * trim + lL + yL + fxs + chL * 0.8f;
+            float xR = (dR * 0.85f + mR) * trim + lR + yR + fxs + chR * 0.8f;
+            const float lRev = mix(kLeadSlot).reverb.load(), lDly = mix(kLeadSlot).delay.load();
+            const float auxRevL = revL * 0.6f * trim + cL * (cd.verb + cmx.reverb.load()) + bL * bmx.reverb.load() + lL * (lp.verb + lRev) + yvL + yL * lRev;
+            const float auxRevR = revR * 0.6f * trim + cR * (cd.verb + cmx.reverb.load()) + bR * bmx.reverb.load() + lR * (lp.verb + lRev) + yvR + yR * lRev;
             const float auxDly = sirenOut * 0.6f + hornOut * 0.25f + laserOut * 0.5f + 0.5f * (cL + cR) * (cd.delay + cmx.delay.load()) +
-                                 0.5f * (bL + bR) * bmx.delay.load() + 0.5f * (lL + lR) * (lp.delay + mix(kLeadSlot).delay.load()) + dlyS;
+                                 0.5f * (bL + bR) * bmx.delay.load() + 0.5f * (lL + lR) * (lp.delay + lDly) + yd + 0.5f * (yL + yR) * lDly + dlyS;
 
             // --- buffer effects (stutter / reverse / tape stop)
             ringL[w] = xL;

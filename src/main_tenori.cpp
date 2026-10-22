@@ -41,7 +41,8 @@ void printLayout() {
         "  TOP ROW:  [Play] [Page] [BPM-] [BPM+] [Mode] [Sound] [Fx] [Shift]\n"
         "  RIGHT COLUMN: the 8 layers (tap to pick one; Shift + tap = mute)\n"
         "\n"
-        "  Each layer plays one sound (Drums, Bass, Chords or Lead) in one mode:\n"
+        "  Each layer plays one instrument (the style's Drums, Bass or Chords, or a Synth\n"
+        "  of its own) in one mode:\n"
         "    Score   rows are notes (top = highest), columns are steps. Tap to toggle.\n"
         "            16 steps: [Page] flips between the two halves.\n"
         "    Bounce  tap a pad: a ball drops from there to the bottom row and back,\n"
@@ -59,12 +60,12 @@ void printLayout() {
         "    rows 1-2  style (sounds, key and tempo)\n"
         "    row 3     sound (4 pads) and mode (4 pads) of this layer\n"
         "    row 4     octave -2..+2 | show other layers | swing | page follows playhead\n"
-        "    rows 5-6  lead sound (green = poly, red = mono, amber = this style's)\n"
+        "    rows 5-6  this layer's synth (green = poly, red = mono, amber = this style's)\n"
         "    row 7     layer volume        row 8  Score loop length (tap twice = odd)\n"
         "    Shift + Mode = clear layer   Shift + Sound = undo   Shift + Play = clear all\n"
         "    Shift + BPM-/+ = tempo by 5  Shift + Page = page follows playhead\n"
         "\n"
-        "  Other MIDI keyboards play the lead sound over the top. Your layers are saved to\n"
+        "  Other MIDI keyboards play LP-DNB's lead synth over the top. Your layers are saved to\n"
         "  %s\n"
         "  Ctrl+C to quit.\n\n",
         Tenori::savePath().c_str());
@@ -93,6 +94,7 @@ int runDemo(const std::string& path, int style, int bars) {
     Engine engine(*sh, static_cast<float>(sr));
     Tenori t(*sh);
     t.setStyle(style);
+    t.syncSynths();
 
     // Layer 1, lead Score: a rising and falling arpeggio.
     const int arp[16] = {0, 2, 4, 7, 4, 2, 0, 2, 1, 3, 5, 7, 5, 3, 1, 3};
@@ -128,7 +130,6 @@ int runDemo(const std::string& path, int style, int bars) {
     double vt = t0;
     // Let the style switch reach the engine first (it sets the style's tempo).
     for (int i = 0; i < 4; ++i) { engine.process(buf.data(), block, vt); vt += static_cast<double>(block) / sr; }
-    t.setLeadPatch(t.leadPatch());
     t.setPlaying(true, vt);
     const double barSec = 60.0 / sh->bpm.load() * 4.0;
     const double end = vt + bars * barSec;

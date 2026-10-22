@@ -51,6 +51,10 @@ constexpr int kLeadSlot = 9;
 constexpr int kHitSlots = 10;
 constexpr int kChannels = 10;
 constexpr int kDrumSlots = 7;       // drum sounds that can be synth or sample
+// Extra lead synths, one per lp-tenori layer, each with its own sound. Cmd::Note
+// slots kSynthSlot0 .. kSynthSlot0 + kSynths - 1 play them (through the Lead channel).
+constexpr int kSynths = 8;
+constexpr int kSynthSlot0 = 16;
 
 inline int trackChannel(int t) {
     if (t == T_BASS) return kBassSlot;
@@ -118,10 +122,12 @@ struct Cmd {
         JumpPattern,  // a = pattern; switch now, keep tempo (after patterns are reordered)
         SetSample,    // a = style, b = drum slot, ptr = const Sample* (or null = synth)
         // One note on any sound, released by the engine after `g` seconds:
-        // a = sound slot (0-6 drum, kChordSlot, kBassSlot, kLeadSlot)
+        // a = sound slot (0-6 drum, kChordSlot, kBassSlot, kLeadSlot, or a layer synth
+        //     kSynthSlot0 + n)
         // b = drum: pitch in semitones; chords: scale degree; bass: semitones above the
-        //     style root; lead: MIDI note.  f = velocity 0..1.25 (above 1 = accent)
+        //     style root; lead / synth: MIDI note.  f = velocity 0..1.25 (above 1 = accent)
         Note,
+        SynthPatch,   // a = layer synth 0..kSynths-1, b = lead patch index
     };
     Type type = Trigger;
     int a = 0;

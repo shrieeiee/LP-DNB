@@ -1,4 +1,5 @@
 #include "gui.h"
+#include "gui_kit.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -25,7 +26,7 @@
 #include "styles.h"
 
 namespace dnb {
-namespace {
+namespace gui {  // building blocks; gui_kit.h shares some with lp-tenori's window
 
 // ------------------------------------------------------- file dialogs --
 #ifdef _WIN32
@@ -1714,7 +1715,8 @@ void handleKeys(App& app, GuiState& gs) {
     }
 }
 
-}  // namespace
+}  // namespace gui
+using namespace gui;
 
 void setupGuiStyle(float scale) {
     ImGuiStyle& st = ImGui::GetStyle();

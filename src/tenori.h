@@ -1,17 +1,16 @@
 // lp-tenori: a Tenori-on style sequencer for the Launchpad Mini, playing the
-// LP-DNB sound engine. Eight layers, each with its own sound (the style's drum
-// kit, bass, chords or the lead synth), its own way of playing (Score, Bounce,
-// Path or Push), octave, loop length and volume. Notes send ripples of light
-// across the grid, Tenori-on style.
+// LP-DNB sound engine. Eight layers, each with its own instrument (the style's
+// drum kit, bass or chords, or a synth of its own), its own way of playing
+// (Score, Bounce, Path or Push), octave, loop length and volume. Notes send
+// ripples of light across the grid, Tenori-on style.
 //
 // Runs its own clock and sends the engine Cmd::Note commands up to 60 ms ahead,
 // each stamped with the exact moment it should sound. The engine holds them back
 // until then, so timing is sample-accurate however irregularly the main loop
 // runs. Everything happens on the main thread (the engine's command queue has a
-// single producer).
+// single producer): the Launchpad, the window and the sequencer.
 #pragma once
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -25,19 +24,27 @@ namespace dnb {
 
 struct Style;
 
-constexpr int kLayers = 8;
-constexpr int kTSteps = 16;    // longest Score loop (two pages of eight)
-constexpr int kPathMax = 16;   // points in a Path
+constexpr int kLayers = kSynths;  // one engine synth per layer
+constexpr int kTSteps = 16;       // longest Score loop (two pages of eight)
+constexpr int kPathMax = 16;      // points in a Path
 
-enum TSound : int { SND_DRUMS = 0, SND_BASS, SND_CHORDS, SND_LEAD, SND_COUNT };
+// SND_SYNTH layers play their own synth (Layer::patch); the others play the style's sounds.
+enum TSound : int { SND_DRUMS = 0, SND_BASS, SND_CHORDS, SND_SYNTH, SND_COUNT };
 enum TMode : int { MODE_SCORE = 0, MODE_BOUNCE, MODE_PATH, MODE_PUSH, MODE_COUNT };
 
 const char* soundName(int s);
 const char* modeName(int m);
+const char* modeHelp(int m);
+// Synth sounds a layer can use (lead patch indices): all but "Style bass".
+const std::vector<int>& synthPatches();
+// Push: steps between repeats for each column, and a label for it.
+double pushRate(int column);
+const char* pushRateName(int column);
 
 struct Layer {
     // --- settings (saved)
-    int sound = SND_LEAD;
+    int sound = SND_SYNTH;
+    int patch = 0;             // SND_SYNTH: lead patch index
     int mode = MODE_SCORE;
     int octave = 0;            // -2..+2
     int length = kTSteps;      // Score loop length 1..16 steps
@@ -77,21 +84,56 @@ public:
     void releaseAll(double now) override;
     void onClock(bool start) override;
 
+    // ---- Transport and global settings.
     void setPlaying(bool on, double now);
     bool playing() const { return playingFlag_; }
-
-    // Settings.
     void setStyle(int style);
     int style() const;
-    void setLeadPatch(int patch);
-    int leadPatch() const { return leadPatch_; }
+    bool swing() const { return swing_; }
+    void setSwing(bool on) { swing_ = on; }
+    bool ghosts() const { return ghosts_; }
+    void setGhosts(bool on) { ghosts_ = on; }
+    bool follow() const { return follow_; }
+    void setFollow(bool on) { follow_ = on; }
 
-    // For the demo and tests: direct access to the layers.
-    Layer& layer(int i) { return layers_[static_cast<size_t>(i % kLayers)]; }
-    void selectLayer(int i) { cur_ = i % kLayers; }
+    // ---- Layers. The Launchpad and the window both edit through these.
+    Layer& layer(int i) { return layers_[static_cast<size_t>(i & 7)]; }
+    const Layer& layer(int i) const { return layers_[static_cast<size_t>(i & 7)]; }
+    int current() const { return cur_; }
+    void selectLayer(int i) { cur_ = i & 7; }
+    void setSound(int layer, int sound);
+    void setPatch(int layer, int patch);    // also makes it a Synth layer
+    void setMode(int layer, int mode);
+    void toggleScore(int layer, int step, int row, double now);
+    void tapBounce(int layer, int x, int y, double now);
+    void tapPath(int layer, int x, int y, double now);
+    void pushDown(int layer, int x, int y, double now);
+    void pushUp(int layer, int x, int y);
+    bool pushHeld(int layer, int x, int y) const;
+    void clearLayer(int layer);
+    void clearAll();
+    void undo();                            // pressing it again redoes
+    bool canUndo() const { return haveUndo_; }
+    // Plays a layer's note right now (auditioning). idx = 0 lowest .. 7 highest.
+    void audition(int layer, int idx, double now);
+
+    // ---- For drawing.
+    int64_t stepAt(double now) const;       // global step sounding at `now` (-1 = none)
+    int scoreStep(int layer, double now) const;  // that layer's Score position (-1 = none)
+    int visiblePage(int layer, double now) const;
+    double lastHit(int layer, int x, int y) const { return flash_[layer & 7][x & 15][y & 7]; }
+    double layerHit(int layer) const { return layerHit_[layer & 7]; }
+    bool shiftHeld() const { return shift_; }
+    bool fxHeld() const { return fxBtn_; }
+    // What a layer plays ("Pluck", "Drums: Punchy kit"...) and each row's name.
+    std::string instrumentName(int layer) const;
+    std::string rowName(int layer, int idx) const;  // idx 0 = lowest
 
     // One line describing what's selected, for the console.
     std::string status() const;
+
+    // Sends every layer's synth sound to the engine (after loading, or offline).
+    void syncSynths();
 
     // Save file (next to the groovebox's): lp-tenori.txt.
     static std::string savePath();
@@ -110,19 +152,16 @@ private:
     void onShiftGrid(int x, int y);
     void nudgeBpm(float d);
 
-    // sequencing (hold mu_)
+    // sequencing
     void fireStep(uint64_t g, double t, double dur);
     void play(int layer, int x, int y, int idx, double t, float vel, float gate);
-    Event voice(const Layer& L, int idx, float vel, float gate) const;
+    Event voice(int layer, int idx, float vel, float gate) const;
     double stepDur(uint64_t g) const;
     double baseStep() const;
     void preview(int layer, int x, int y, int idx, double now);
     void send(const Event& e, double t);
     void noteLights(int layer, int x, int y, double t);
-    int visiblePage(const Layer& L, double now) const;
-    int64_t stepAt(double now) const;  // global step sounding at `now` (-1 = none yet)
-    void clearLayer(int i);
-    void undo();
+    void dropHeld(int layer);
 
     Shared& sh_;
 
@@ -130,7 +169,6 @@ private:
     std::array<Layer, kLayers> undo_;
     bool haveUndo_ = false;
     int cur_ = 0;
-    int leadPatch_ = 0;
     bool swing_ = true;
     bool ghosts_ = false;     // show the other layers' Score notes faintly
     bool follow_ = true;      // Score page follows the playhead
@@ -143,12 +181,12 @@ private:
     std::array<double, 64> stepT_{};  // when recent steps fire, by g % 64
     uint64_t firedUpTo_ = 0;  // steps fired so far
 
-    // Push: pads held on Push layers. rate = steps between hits.
+    // Push: pads held on Push layers.
     struct Held { int layer, x, y; double skipUntil; };
     std::vector<Held> held_;
 
     // buttons
-    bool shift_ = false, fxBtn_ = false, shiftUsed_ = false;
+    bool shift_ = false, fxBtn_ = false;
     int padFx_[16];
     int bpmHeld_ = 0;
     double bpmNext_ = 0.0;
@@ -158,6 +196,7 @@ private:
     std::vector<Ripple> ripples_;
     double flash_[kLayers][kTSteps][8] = {};  // when each note last sounded [layer][step or column][row]
     double layerHit_[kLayers] = {};
+    double rippleT_[kLayers][8][8] = {};      // when each pad last sent a ripple
 
     // saving
     std::string lastSaved_;

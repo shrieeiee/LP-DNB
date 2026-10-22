@@ -54,11 +54,35 @@ else()
   add_executable(lp-dnb ${CORE_SOURCES} src/main_console.cpp)
 endif()
 
-# lp-tenori: a Tenori-on style sequencer on the same sound engine. A console
-# program on every platform.
-add_executable(lp-tenori ${CORE_SOURCES} src/tenori.cpp src/main_tenori.cpp)
+# lp-tenori: a Tenori-on style sequencer on the same sound engine. On Windows it
+# has a window like lp-dnb's (same window code, built with LP_TENORI); elsewhere
+# it's a console program.
 if(WIN32)
-  target_sources(lp-tenori PRIVATE src/lp-dnb.rc)  # same icon and version details
+  add_executable(lp-tenori WIN32
+    ${CORE_SOURCES}
+    src/tenori.cpp
+    src/tenori_gui.cpp
+    src/gui.cpp
+    src/fonts_data.cpp
+    src/notices_data.cpp
+    src/main_win32.cpp
+    src/lp-dnb.rc  # same icon and version details
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_win32.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_dx11.cpp)
+  target_compile_definitions(lp-tenori PRIVATE LP_TENORI)
+  target_include_directories(lp-tenori PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+  target_link_libraries(lp-tenori PRIVATE d3d11 d3dcompiler dxgi dwmapi comdlg32 shell32 ole32)
+  if(MSVC)
+    target_link_options(lp-tenori PRIVATE /SUBSYSTEM:WINDOWS)
+  else()
+    target_link_options(lp-tenori PRIVATE -mwindows)
+  endif()
+else()
+  add_executable(lp-tenori ${CORE_SOURCES} src/tenori.cpp src/main_tenori.cpp)
 endif()
 
 find_package(Threads REQUIRED)
@@ -107,6 +131,8 @@ target_include_directories(lp-dnb-tests PRIVATE src)
 # Keep the licences of the bundled libraries and font next to the program.
 add_custom_command(TARGET lp-dnb POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/THIRD-PARTY-NOTICES.txt $<TARGET_FILE_DIR:lp-dnb>)
+add_custom_command(TARGET lp-tenori POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/THIRD-PARTY-NOTICES.txt $<TARGET_FILE_DIR:lp-tenori>)
 
 if(WIN32)
   target_compile_definitions(lp-dnb-tests PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)

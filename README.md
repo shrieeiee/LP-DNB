@@ -197,7 +197,8 @@ then Open Project and build the `Release` configuration in Visual Studio.
 
 **macOS / Linux** build a console version (same synth, lights and hot-plugging, no window).
 
-Every platform also builds `lp-tenori` (the Tenori-on style sequencer) next to `lp-dnb`.
+Every platform also builds `lp-tenori` (the Tenori-on style sequencer) next to `lp-dnb`: a window on Windows
+(`build\Release\lp-tenori.exe`), a console program on macOS and Linux.
 
 **macOS**
 
@@ -282,10 +283,38 @@ mutes and save file.
 ## lp-tenori: a Tenori-on on the Launchpad
 
 `lp-tenori` is a separate program built alongside `lp-dnb`. It turns the Launchpad into a Tenori-on: light-up
-grid sequencing with **8 layers** playing at once, each with its own sound, way of playing, octave, loop length
-and volume. It uses LP-DNB's sound engine, so every style's drum kit, bass, chords, lead sounds, effects, mixer
-settings and sampled drums are all there. Every note sends a ripple of light out across the grid in its layer's
-colour.
+grid sequencing with **8 layers** playing at once, each with its own **instrument**, way of playing, octave, loop
+length and volume. It uses LP-DNB's sound engine, so every style's drum kit, bass, chords, effects, mixer settings
+and sampled drums are there, and every layer can also have **its own synth** (17 sounds: leads, keys, pads, mono
+synths and the style's chord sound). Every note sends a ripple of light out across the grid in its layer's colour.
+
+![lp-tenori on Windows](docs/lp-tenori.png)
+
+### The window (Windows)
+
+- **Top bar**: Play/Stop, Record (to WAV), style, tempo, swing, volume and level.
+- **Launchpad** (left): a live copy of the lights that you can click like the real one. Click **Fx** or **Shift**
+  to hold them (click again to let go), so the settings page works with a mouse too.
+- **Layers**: the eight layers as cards (they flash as they play; click one to show it, right-click to mute it), then
+  the selected layer's **instrument**, **mode**, octave, volume and mute, then a big editor for it:
+  - **Score**: all 16 steps at once, with note names down the side (click a name to hear it). Click or drag to
+    paint notes; the loop length marker shows where the layer wraps round.
+  - **Bounce**: click where to drop a ball in each column; the balls bounce live, and each row says how often it lands.
+  - **Path**: numbered points joined by the route, with the light travelling along it.
+  - **Push**: hold a square with the mouse to repeat it; columns are labelled with their speeds.
+- **Instruments**: the instrument picker for each layer as big buttons, grouped (this style's drums / bass / chords,
+  then Leads, Keys, Pads, Mono and the style's chord sound). Picking one plays a note so you hear it. Below: which sound
+  other MIDI keyboards play. The same picker opens from the instrument button on the Layers page.
+- **Mixer**, **Devices** and **About**: the same as in lp-dnb (the layer synths go through the Mixer's Lead channel).
+- **Effects**: hold any of the style's 16 effects, plus delay, reverb and chorus settings.
+- **Keys**: Space = play/stop, 1-8 = show that layer.
+
+On macOS and Linux lp-tenori is a console program (Launchpad, sound and saving all the same) that prints what's
+selected on one status line. Options: `--list`, `--style N`, `--audio "device name"`, and
+`--demo [out.wav] [--style N] [--bars N]`, which renders a little scene using every mode offline (no hardware
+needed) and prints how many notes each sound played.
+
+### On the Launchpad
 
 ```
  (Play) (Page) (BPM-) (BPM+) (Mode) (Sound) (Fx) (Shift)     <- round top buttons
@@ -305,9 +334,10 @@ colour.
 | Path | Tap points and a light travels between them in the order you placed them, playing each one. The further apart two points are, the longer the gap, so the shape you draw is the rhythm. Tap a point again to remove it. |
 | Push | Hold pads to play them on repeat while held. Rows are notes, columns are how fast: from once a bar on the left to 1/64 notes on the right. |
 
-**Sounds** (**Sound** steps through them): **Drums** (rows are the style's kit, kick at the bottom, with its chord stab
-on the top row; in Bounce mode the columns are the kit), **Bass**, **Chords** (a chord on each scale degree) and
-**Lead** (the lead synth; pick its sound on the Shift page). Notes are always in the style's key.
+**Instruments** (**Sound** steps through the kinds): **Drums** (rows are the style's kit, kick at the bottom, with
+its chord stab on the top row; in Bounce mode the columns are the kit), **Bass**, **Chords** (a chord on each scale
+degree) and **Synth** (the layer's own synth; pick its sound on the Shift page or in the window). Notes are always
+in the style's key.
 
 **Other buttons**
 
@@ -315,27 +345,21 @@ on the top row; in Bounce mode the columns are the kit), **Bass**, **Chords** (a
 - **Fx** (hold): the bottom two rows become the style's 16 effects, as in lp-dnb. Hold an effect pad.
 - **Shift** (hold) shows the settings page:
   - rows 1-2: **style** (sounds, key and tempo)
-  - row 3: this layer's **sound** (first four pads) and **mode** (last four)
+  - row 3: this layer's **instrument kind** (first four pads) and **mode** (last four)
   - row 4: **octave** -2 to +2, then three switches: show the other layers' notes faintly, swing, page follows playhead
-  - rows 5-6: the **lead sound** (green = polyphonic, red = mono, amber = the style's chord sound)
+  - rows 5-6: this layer's **synth sound** (green = polyphonic, red = mono, amber = the style's chord sound)
   - row 7: layer **volume**; row 8: Score **loop length** (tap a pad again for the odd length in between)
   - Shift + right column: **mute** a layer (red = muted)
   - Shift + **Mode**: clear this layer. Shift + **Play**: clear every layer. Shift + **Sound**: undo the clear (again to redo).
   - Shift + **BPM-/BPM+**: tempo in steps of 5
 - When stopped, placing a note plays it so you can hear what you're adding.
 
-Your layers, style, tempo and lead sound are saved automatically to `lp-tenori.txt` next to LP-DNB's own
-save file, and lp-tenori leaves LP-DNB's patterns and settings alone. Other MIDI keyboards still play the lead
-sound over the top, and **Follow clock from** (set in lp-dnb) starts and stops it.
+Your layers, instruments, style and tempo are saved automatically to `lp-tenori.txt` next to LP-DNB's own save
+file, and lp-tenori leaves LP-DNB's patterns and settings alone. Other MIDI keyboards still play a synth over the
+top, and **Follow clock from** (set in lp-dnb) starts and stops it.
 
-Run it from the same build folder (`build\Release\lp-tenori.exe` on Windows, `./build/lp-tenori` elsewhere).
-It's a console program on every platform and shows what's selected on one status line. Options: `--list`,
-`--style N`, `--audio "device name"`, and `--demo [out.wav] [--style N] [--bars N]`, which renders a little
-scene using every mode offline (no hardware needed) and prints how many notes each sound played.
-
-Things to know: all Lead layers share the one lead synth (and its sound), so a mono lead sound plays one note at
-a time across them; the Bass is one monophonic synth too. MIDI clock *output* only follows lp-dnb's own sequencer,
-so it doesn't run in lp-tenori.
+Things to know: the style's Bass is one monophonic synth, so two Bass layers share it (Synth layers don't share:
+each has its own). MIDI clock *output* only follows lp-dnb's own sequencer, so it doesn't run in lp-tenori.
 
 ## Other MIDI controllers
 
@@ -403,7 +427,9 @@ pat("Two-step", {"x.........x.....",   // drums: x hit  X accent  o ghost  r 2-h
 - `src/gui.cpp`, `src/main_win32.cpp` – the Windows window (Dear ImGui + Direct3D 11)
 - `src/main_console.cpp` – console front-end for macOS / Linux, plus the offline demo/test renderer
 - `src/tenori.cpp` – lp-tenori's sequencer: layers, modes, scheduling, Launchpad mapping, lights, save file
-- `src/main_tenori.cpp` – lp-tenori's console front-end and offline demo
+- `src/tenori_gui.cpp` – lp-tenori's window contents (the window itself is `main_win32.cpp` built with `LP_TENORI`)
+- `src/gui_kit.h` – the widgets and pages of lp-dnb's window that lp-tenori's window shares
+- `src/main_tenori.cpp` – lp-tenori's console front-end (macOS / Linux) and offline demo
 - `tests/selftest.cpp` – offline engine and file-format checks
 
 ## Credits and licences
