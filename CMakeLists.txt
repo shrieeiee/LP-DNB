@@ -45,3 +45,6 @@ if(MSVC)
 else()
   target_compile_options(lp-dnb PRIVATE -Wall -Wextra -O2)
 endif()
+
+# Make "Start" in Visual Studio run lp-dnb instead of ALL_BUILD.
+set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT lp-dnb)
