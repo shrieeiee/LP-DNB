@@ -15,12 +15,11 @@
 
 #include "engine.h"
 #include "log.h"
-#include "patterns.h"
+#include "styles.h"
 
 namespace dnb {
 
 constexpr int kSampleRate = 48000;  // fixed; miniaudio converts if the device differs
-constexpr int kMidiF1 = 29;         // MIDI note number of F1, the bass root
 
 struct App::Audio {
     ma_context ctx{};
@@ -51,7 +50,8 @@ struct App::Audio {
 
 App::App(bool nullAudio)
     : sh_(std::make_unique<Shared>()), audio_(std::make_unique<Audio>()) {
-    loadPresets(*sh_);
+    loadAllPresets(*sh_);  // also builds the style table before audio starts
+    sh_->bpm.store(styles()[0].bpm);
     engine_ = std::make_unique<Engine>(*sh_, static_cast<float>(kSampleRate));
     ctl_ = std::make_unique<Controller>(*sh_);
     midi_ = std::make_unique<MidiHub>();
@@ -167,41 +167,44 @@ void App::handleKeyboard(const std::vector<unsigned char>& m) {
     const bool off = status == 0x80 || (status == 0x90 && m[2] == 0);
     if (!on && !off) return;
 
-    if (ch == 9) {  // General MIDI drum channel
+    if (ch == 9) {  // General MIDI drum channel -> this style's drum pads
         if (!on) return;
-        int s = -1;
+        int slot;
         switch (note) {
-            case 35: case 36: s = S_KICK; break;
-            case 38: case 40: s = S_SNARE; break;
-            case 37: case 39: s = S_GHOST; break;
-            case 42: case 44: s = S_HAT; break;
-            case 46: s = S_OHAT; break;
-            case 51: case 53: case 59: s = S_RIDE; break;
-            case 49: case 52: case 55: case 57: s = S_CRASH; break;
-            default: s = S_STAB; break;
+            case 35: case 36: slot = 0; break;
+            case 38: case 40: slot = 1; break;
+            case 42: case 44: slot = 2; break;
+            case 46: slot = 3; break;
+            case 39: case 51: case 53: case 59: slot = 4; break;
+            case 37: case 41: case 43: case 45: case 47: case 48: case 50: slot = 5; break;
+            case 49: case 52: case 55: case 56: case 57: slot = kExtraSlot; break;
+            default: slot = kChordSlot; break;
         }
-        sh_->send(Cmd::Trigger, s);
+        sh_->send(Cmd::Trigger, slot);
         return;
     }
 
-    // Anything else plays the Reese bass, folded into F0..F3.
-    int semi = note - kMidiF1;
+    // Anything else plays the bass, relative to the style's key, folded into range.
+    const Style& st = styleOf(sh_->pattern.load());
+    int semi = note - st.root;
     while (semi < -12) semi += 12;
     while (semi > 36) semi -= 12;
-    if (on) {
-        kbNotes_.push_back(semi);
-        sh_->send(Cmd::BassOn, semi);
-    } else {
-        auto it = std::find(kbNotes_.begin(), kbNotes_.end(), semi);
-        if (it != kbNotes_.end()) {
-            kbNotes_.erase(it);
-            sh_->send(Cmd::BassOff, semi);
+    // Remember what each key sent, so its note-off matches even if the style changed.
+    for (size_t i = 0; i < kbNotes_.size(); ++i) {
+        if (kbNotes_[i].first == note) {
+            sh_->send(Cmd::BassOff, kbNotes_[i].second);
+            kbNotes_.erase(kbNotes_.begin() + static_cast<long>(i));
+            break;
         }
+    }
+    if (on) {
+        kbNotes_.push_back({note, semi});
+        sh_->send(Cmd::BassOn, semi);
     }
 }
 
 void App::releaseKeyboardNotes() {
-    for (int s : kbNotes_) sh_->send(Cmd::BassOff, s);
+    for (const auto& n : kbNotes_) sh_->send(Cmd::BassOff, n.second);
     kbNotes_.clear();
 }
 

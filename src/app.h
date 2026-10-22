@@ -4,6 +4,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common.h"
@@ -56,7 +57,7 @@ private:
     std::vector<std::string> audioNames_;
     std::string preferredAudio_, openedAudio_, audioStatus_;
 
-    std::vector<int> kbNotes_;  // bass notes held on MIDI keyboards
+    std::vector<std::pair<int, int>> kbNotes_;  // (MIDI note, semitone sent) held on keyboards
     size_t kbOpenCount_ = 0;
 };
 

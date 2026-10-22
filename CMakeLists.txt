@@ -16,6 +16,7 @@ set(IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
 
 set(CORE_SOURCES
   src/app.cpp
+  src/styles.cpp
   src/engine.cpp
   src/controller.cpp
   src/launchpad.cpp

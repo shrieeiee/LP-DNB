@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "log.h"
+#include "styles.h"
 
 namespace dnb {
 namespace {
@@ -22,11 +23,6 @@ const Color DIM_RED{1.f, 0.f};
 const Color DIM_GREEN{0.f, 1.f};
 const Color DIM_AMBER{1.f, 1.f};
 
-const Color kSoundColor[S_COUNT + 1] = {RED, AMBER, ORANGE, GREEN, LIME, YELLOW, AMBER, YELLOW, GREEN};
-
-const Color kFxColor[FX_COUNT] = {AMBER, AMBER, AMBER, AMBER, RED,   ORANGE, LIME,   GREEN,
-                                  RED,   AMBER, ORANGE, LIME, AMBER, RED,    AMBER,  ORANGE};
-
 Color scale(Color c, float k) { return {c.r * k, c.g * k}; }
 Color lerp(Color a, Color b, float k) { return {a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k}; }
 void add(Color& d, Color c, float k = 1.f) {
@@ -42,6 +38,7 @@ uint8_t quant(Color c) {
     int g = std::clamp(static_cast<int>(c.g + 0.5f), 0, 3);
     return static_cast<uint8_t>(r | (g << 4));
 }
+Color ledToColor(uint8_t v) { return {static_cast<float>(v & 3), static_cast<float>((v >> 4) & 3)}; }
 float frac(double v) { return static_cast<float>(v - std::floor(v)); }
 uint32_t hash32(uint32_t x) {
     x ^= x >> 16;
@@ -55,29 +52,83 @@ float angDiff(float a, float b) {
     float d = std::fmod(std::fabs(a - b), kTwoPi);
     return d > kPi ? kTwoPi - d : d;
 }
-int bassIdx(int semi) {
-    for (int i = 0; i < 8; ++i)
-        if (kBassScale[i] == semi) return i;
-    return 0;
-}
 int trackHitSlot(int t) {
-    if (t == T_BASS) return kBassHitSlot;
-    if (t == T_STAB) return S_STAB;
+    if (t == T_BASS) return kBassSlot;
+    if (t == T_CHORD) return kChordSlot;
     return t;
 }
 const int kStutDiv[4] = {4, 8, 16, 32};
 
 }  // namespace
 
+// ------------------------------------------------------- shared helpers --
+
+Color slotColor(const Style& s, int slot) {
+    if (slot == T_BASS || slot == kBassSlot) return GREEN;
+    if (slot == T_CHORD || slot == kChordSlot) return YELLOW;
+    if (slot < 0 || slot > kExtraSlot) return AMBER;
+    const DrumDef& d = s.drums[static_cast<size_t>(slot)];
+    switch (d.type) {
+        case DrumType::Kick: return RED;
+        case DrumType::Snare: return d.gain < 0.5f ? ORANGE : AMBER;
+        case DrumType::Clap: return AMBER;
+        case DrumType::Metal: return d.p[4] > 30.f ? GREEN : (d.p[4] > 5.f ? LIME : YELLOW);
+        case DrumType::Rim: return YELLOW;
+        case DrumType::Tom: return ORANGE;
+        case DrumType::Shaker: return LIME;
+        case DrumType::Cowbell: return YELLOW;
+    }
+    return AMBER;
+}
+
+Color fxColor(int fx) {
+    switch (fx) {
+        case FX_STUT4: case FX_STUT8: case FX_STUT16: case FX_STUT32: case FX_REVERSE: case FX_TAPESTOP:
+            return RED;
+        case FX_HALFTIME: case FX_PUMP: case FX_GATE: return ORANGE;
+        case FX_LPF: case FX_HPF: case FX_CRUSH: case FX_FLANGE: case FX_LOFI: return GREEN;
+        case FX_DELAY: case FX_REVERB: return LIME;
+        default: return AMBER;  // sound effects: siren, riser, horn, laser
+    }
+}
+
+std::string trackName(const Style& s, int t) {
+    if (t == T_BASS) return s.bass.name;
+    if (t == T_CHORD) return s.chord.name;
+    if (t >= 0 && t < kDrumTracks) return s.drums[static_cast<size_t>(t)].name;
+    return "?";
+}
+
+// ------------------------------------------------------------ controller --
+
 Controller::Controller(Shared& sh) : sh_(sh) {
-    for (int s = 0; s <= S_COUNT; ++s) {
+    for (int s = 0; s < kHitSlots; ++s) {
         seenHits_[s] = sh_.hits[s].load();
         hitTime_[s] = -10.0;
     }
     for (int f = 0; f < FX_COUNT; ++f) fxRelease_[f] = -10.0;
+    for (int& p : padFx_) p = -1;
+    for (int& b : bassPadSemi_) b = -1000;
 }
 
-double Controller::beatSec() const { return 60.0 / std::max(60.f, sh_.bpm.load()); }
+double Controller::beatSec() const { return 60.0 / std::max(40.f, sh_.bpm.load()); }
+int Controller::currentStyle() const { return sh_.pattern.load() / kSlots; }
+
+void Controller::chooseStyle(int style) {
+    if (style < 0 || style >= styleCount()) return;
+    sh_.send(Cmd::QueuePattern, style * kSlots);
+    const Style& s = styles()[static_cast<size_t>(style)];
+    logf("Style: %s (%s, %.0f BPM)%s", s.name.c_str(), s.keyName.c_str(), s.bpm,
+         sh_.playing.load() ? " - starts on the next bar" : "");
+}
+
+void Controller::choosePattern(int slot) {
+    const int style = currentStyle();
+    sh_.send(Cmd::QueuePattern, style * kSlots + slot);
+    const Style& s = styles()[static_cast<size_t>(style)];
+    logf("Pattern %d: %s%s", slot + 1, s.patterns[static_cast<size_t>(slot)].name.c_str(),
+         sh_.playing.load() ? " (next bar)" : "");
+}
 
 // ------------------------------------------------------------------ input --
 
@@ -97,43 +148,71 @@ void Controller::onMidi(const std::vector<unsigned char>& m, double now) {
 
 void Controller::onGrid(int x, int y, bool down, double now) {
     const int p = sh_.pattern.load();
+    const Style& st = styleOf(p);
 
-    if (y == 4) {  // drum pads
+    // Holding View turns the top four rows into the style picker.
+    if (viewHeld_ && y < 4) {
         if (down) {
-            sh_.send(Cmd::Trigger, x);
-            if (x == S_GHOST || x == S_HAT || x == S_OHAT || x == S_RIDE)
-                spawnRipple(static_cast<float>(x), 4.f, kSoundColor[x], now, 7.f);
+            chooseStyle(y * 8 + x);
+            comboUsed_ = true;
         }
         return;
     }
 
-    if (y == 5) {  // bass pads
-        const int semi = kBassScale[x];
+    if (y == 4) {  // drum pads (+ chord pad on the right)
+        if (x == kChordSlot) {
+            if (down && !chordPadHeld_) {
+                chordPadHeld_ = true;
+                sh_.send(Cmd::ChordOn, lastBassIdx_);
+                spawnRipple(7.f, 4.f, YELLOW, now, 7.f);
+            } else if (!down && chordPadHeld_) {
+                chordPadHeld_ = false;
+                sh_.send(Cmd::ChordOff);
+            }
+            return;
+        }
         if (down) {
-            bassPadHeld_[x] = true;
+            sh_.send(Cmd::Trigger, x);
+            const DrumType t = st.drums[static_cast<size_t>(x)].type;
+            if (t != DrumType::Kick && t != DrumType::Snare && t != DrumType::Clap)
+                spawnRipple(static_cast<float>(x), 4.f, slotColor(st, x), now, 7.f);
+        }
+        return;
+    }
+
+    if (y == 5) {  // note pads: the style's scale, one octave
+        if (down) {
+            const int semi = degreeSemis(st, x);
+            if (bassPadSemi_[x] != -1000) sh_.send(Cmd::BassOff, bassPadSemi_[x]);
+            bassPadSemi_[x] = semi;
             lastBassIdx_ = x;
             sh_.send(Cmd::BassOn, semi);
             spawnRipple(static_cast<float>(x), 5.f, GREEN, now, 6.f);
-            if (view_ == EDIT && heldStep_ >= 0) {
-                sh_.bassNote[p][heldStep_].store(static_cast<int8_t>(semi));
-                sh_.on[p][T_BASS][heldStep_].store(1);
+            if (view_ == EDIT && heldStep_ >= 0 && (selTrack_ == T_BASS || selTrack_ == T_CHORD)) {
+                sh_.note[p][selTrack_][heldStep_].store(static_cast<int8_t>(x));
+                if (!stepSounds(sh_.on[p][selTrack_][heldStep_].load())) sh_.on[p][selTrack_][heldStep_].store(STEP_ON);
             }
-        } else if (bassPadHeld_[x]) {
-            bassPadHeld_[x] = false;
-            sh_.send(Cmd::BassOff, semi);
+        } else if (bassPadSemi_[x] != -1000) {
+            sh_.send(Cmd::BassOff, bassPadSemi_[x]);
+            bassPadSemi_[x] = -1000;
         }
         return;
     }
 
-    if (y >= 6) {  // effect pads
-        const int f = (y - 6) * 8 + x;
-        if (down && !fxHeld_[f]) {
+    if (y >= 6) {  // effect pads, mapped by the style
+        const int pad = (y - 6) * 8 + x;
+        if (down && padFx_[pad] < 0) {
+            const int f = st.fx[static_cast<size_t>(pad)];
+            if (f < 0 || f >= FX_COUNT || fxHeld_[f]) return;
+            padFx_[pad] = f;
             fxHeld_[f] = true;
             fxPress_[f] = now;
             sh_.send(Cmd::FxOn, f);
-            spawnRipple(static_cast<float>(x), static_cast<float>(y), kFxColor[f], now, 11.f);
+            spawnRipple(static_cast<float>(x), static_cast<float>(y), fxColor(f), now, 11.f);
             logf("FX: %s", fxName(f));
-        } else if (!down && fxHeld_[f]) {
+        } else if (!down && padFx_[pad] >= 0) {
+            const int f = padFx_[pad];
+            padFx_[pad] = -1;
             fxHeld_[f] = false;
             fxRelease_[f] = now;
             if (f == FX_RISER) riserHeldFor_ = now - fxPress_[f];
@@ -146,10 +225,10 @@ void Controller::onGrid(int x, int y, bool down, double now) {
     if (view_ == EDIT && y < 2) {
         const int s = y * 8 + x;
         if (down) {
-            bool on = sh_.on[p][selTrack_][s].load() != 0;
-            sh_.on[p][selTrack_][s].store(on ? 0 : 1);
-            if (selTrack_ == T_BASS) {
-                if (!on) sh_.bassNote[p][s].store(static_cast<int8_t>(kBassScale[lastBassIdx_]));
+            const bool on = stepSounds(sh_.on[p][selTrack_][s].load());
+            sh_.on[p][selTrack_][s].store(on ? STEP_OFF : STEP_ON);
+            if (selTrack_ >= T_BASS) {
+                if (!on) sh_.note[p][selTrack_][s].store(static_cast<int8_t>(lastBassIdx_));
                 heldStep_ = s;
             }
         } else if (heldStep_ == s) {
@@ -162,26 +241,27 @@ void Controller::onGrid(int x, int y, bool down, double now) {
 
 void Controller::onScene(int row, bool down) {
     if (!down) return;
+    const int p = sh_.pattern.load();
+    const Style& st = styleOf(p);
     if (view_ == EDIT) {
         if (viewHeld_) {
-            const int p = sh_.pattern.load();
-            for (int s = 0; s < kSteps; ++s) sh_.on[p][row][s].store(0);
+            for (int s = 0; s < kSteps; ++s) sh_.on[p][row][s].store(STEP_OFF);
             comboUsed_ = true;
-            logf("Cleared %s in pattern %d", trackName(row), p + 1);
+            logf("Cleared %s", trackName(st, row).c_str());
         } else {
             selTrack_ = row;
             heldStep_ = -1;
-            logf("Editing: %s", trackName(row));
+            logf("Editing: %s", trackName(st, row).c_str());
         }
     } else {
         bool m = !sh_.mute[row].load();
         sh_.mute[row].store(m);
-        logf("%s %s", trackName(row), m ? "muted" : "unmuted");
+        logf("%s %s", trackName(st, row).c_str(), m ? "muted" : "unmuted");
     }
 }
 
 void Controller::nudgeBpm(float d) {
-    float b = std::clamp(std::round(sh_.bpm.load() + d), 100.f, 200.f);
+    float b = std::clamp(std::round(sh_.bpm.load() + d), 60.f, 200.f);
     sh_.bpm.store(b);
     logf("Tempo: %.0f BPM", b);
 }
@@ -221,17 +301,19 @@ void Controller::onTop(int i, bool down, double now) {
         default:
             if (!down) break;
             {
-                const int target = i - 4;
+                const int slot = i - 4;
                 if (viewHeld_) {
                     const int src = sh_.pattern.load();
+                    const int dst = (src / kSlots) * kSlots + slot;
                     for (int t = 0; t < kTracks; ++t)
-                        for (int s = 0; s < kSteps; ++s) sh_.on[target][t][s].store(sh_.on[src][t][s].load());
-                    for (int s = 0; s < kSteps; ++s) sh_.bassNote[target][s].store(sh_.bassNote[src][s].load());
+                        for (int s = 0; s < kSteps; ++s) {
+                            sh_.on[dst][t][s].store(sh_.on[src][t][s].load());
+                            sh_.note[dst][t][s].store(sh_.note[src][t][s].load());
+                        }
                     comboUsed_ = true;
-                    logf("Copied pattern %d -> %d", src + 1, target + 1);
+                    logf("Copied pattern %d -> %d", src % kSlots + 1, slot + 1);
                 } else {
-                    sh_.send(Cmd::QueuePattern, target);
-                    logf("Pattern %d %s", target + 1, sh_.playing.load() ? "queued for next bar" : "selected");
+                    choosePattern(slot);
                 }
             }
             break;
@@ -239,10 +321,11 @@ void Controller::onTop(int i, bool down, double now) {
 }
 
 void Controller::releaseAll(double now) {
-    for (int f = 0; f < FX_COUNT; ++f)
-        if (fxHeld_[f]) onGrid(f % 8, 6 + f / 8, false, now);
+    for (int pad = 0; pad < 16; ++pad)
+        if (padFx_[pad] >= 0) onGrid(pad % 8, 6 + pad / 8, false, now);
     for (int x = 0; x < 8; ++x)
-        if (bassPadHeld_[x]) onGrid(x, 5, false, now);
+        if (bassPadSemi_[x] != -1000) onGrid(x, 5, false, now);
+    if (chordPadHeld_) onGrid(kChordSlot, 4, false, now);
     heldStep_ = -1;
     bpmHeld_ = 0;
     viewHeld_ = false;
@@ -412,6 +495,53 @@ void Controller::drawFx(int fx, double t, double now, float dt, Color cv[8][4]) 
                 }
             break;
         }
+        case FX_PUMP: {  // whole canvas ducks on every beat and swells back
+            const float bp = sh_.beatPhase.load();
+            const float k = std::min(1.f, bp / 0.45f);
+            const float g = 0.1f + 0.9f * k * k;
+            for (int x = 0; x < 8; ++x)
+                for (int y = 0; y < 4; ++y) {
+                    float d = std::hypot(x - 3.5f, (y - 1.5f) * 1.6f) / 4.f;
+                    cv[x][y] = scale(ORANGE, std::clamp(g * 1.3f - d * (1.f - g), 0.f, 1.f));
+                }
+            break;
+        }
+        case FX_GATE: {  // columns chop on and off with the 16th-note gate
+            const float bp = sh_.beatPhase.load();
+            const int sixteenth = static_cast<int>(bp * 4.f);
+            const bool open = frac(bp * 4.f) < 0.5f;
+            for (int x = 0; x < 8; ++x)
+                for (int y = 0; y < 4; ++y) {
+                    bool lit = open && ((x / 2) == sixteenth);
+                    cv[x][y] = lit ? ORANGE : scale(cv[x][y], 0.15f);
+                }
+            break;
+        }
+        case FX_LOFI: {  // warm, dim, flickery, with dust specks
+            const float flick = 0.75f + 0.25f * std::sin(static_cast<float>(now) * 23.f) * std::sin(static_cast<float>(now) * 7.f);
+            for (int x = 0; x < 8; ++x)
+                for (int y = 0; y < 4; ++y) {
+                    Color c = scale(Color{2.f, 1.2f}, flick * (0.5f + 0.5f * std::sin(x * 0.7f + y + static_cast<float>(t) * 0.8f)));
+                    if (hash32(static_cast<uint32_t>(now * 12.0) * 64 + x * 4 + y) % 23 == 0) c = DIM_AMBER;
+                    cv[x][y] = c;
+                }
+            break;
+        }
+        case FX_LASER: {  // beams fire across a row every 8th note
+            const double E = beat * 0.5;
+            const int n = static_cast<int>(t / E);
+            const float head = frac(t / E) * 11.f - 1.f;
+            const int row = static_cast<int>(hash32(static_cast<uint32_t>(n) * 7919u) % 4);
+            for (int x = 0; x < 8; ++x)
+                for (int y = 0; y < 4; ++y) {
+                    cv[x][y] = scale(cv[x][y], 0.1f);
+                    if (y == row) {
+                        float dx = head - x;
+                        if (dx >= 0.f && dx < 3.f) cv[x][y] = scale(n & 1 ? RED : GREEN, 1.f - dx / 3.f);
+                    }
+                }
+            break;
+        }
         case FX_HORN: {
             const Color c = (static_cast<int>(t * 6.0) & 1) ? AMBER : RED;
             for (int x = 0; x < 8; ++x)
@@ -531,27 +661,42 @@ void Controller::render(double now, Frame& out) {
     const float dt = lastFrame_ > 0.0 ? static_cast<float>(std::min(0.1, now - lastFrame_)) : 0.033f;
     lastFrame_ = now;
 
-    // Pick up drum/bass hits from the audio thread.
-    for (int s = 0; s <= S_COUNT; ++s) {
+    const int p = sh_.pattern.load();
+    const int styleIdx = p / kSlots;
+    const Style& st = styleOf(p);
+    if (styleIdx != lastStyle_) {
+        if (lastStyle_ >= 0) styleChangedAt_ = now;
+        lastStyle_ = styleIdx;
+    }
+
+    // Pick up hits from the audio thread; the ripple depends on the kind of sound.
+    for (int s = 0; s < kHitSlots; ++s) {
         uint32_t h = sh_.hits[s].load(std::memory_order_relaxed);
         if (h == seenHits_[s]) continue;
         seenHits_[s] = h;
         hitTime_[s] = now;
-        if (s == kBassHitSlot) env_[T_BASS] = 1.f;
-        else if (s == S_STAB) env_[T_STAB] = 1.f;
-        else if (s <= S_RIDE) env_[s] = 1.f;
-        switch (s) {
-            case S_KICK: spawnRipple(3.5f, 4.2f, RED, now, 10.f); break;           // rises from the bottom
-            case S_SNARE: spawnRipple(3.5f, -1.2f, AMBER, now, 10.f); break;       // falls from the top
-            case S_CRASH: spawnRipple(3.5f, 1.5f, AMBER, now, 7.f); break;         // bursts from the middle
-            case S_STAB:
-                spawnRipple(-1.f, 1.5f, YELLOW, now, 8.f);                         // closes in from the sides
-                spawnRipple(8.f, 1.5f, YELLOW, now, 8.f);
+        if (s == kBassSlot) { env_[T_BASS] = 1.f; continue; }
+        if (s == kChordSlot) {
+            env_[T_CHORD] = 1.f;
+            spawnRipple(-1.f, 1.5f, YELLOW, now, 8.f);  // closes in from the sides
+            spawnRipple(8.f, 1.5f, YELLOW, now, 8.f);
+            continue;
+        }
+        if (s < kDrumTracks) env_[s] = 1.f;
+        const DrumDef& d = st.drums[static_cast<size_t>(s)];
+        switch (d.type) {
+            case DrumType::Kick: spawnRipple(3.5f, 4.2f, RED, now, 10.f); break;        // rises from the bottom
+            case DrumType::Snare:
+            case DrumType::Clap: spawnRipple(3.5f, -1.2f, AMBER, now, 10.f); break;     // falls from the top
+            case DrumType::Metal:
+                if (d.p[4] < 2.5f) spawnRipple(3.5f, 1.5f, AMBER, now, 7.f);             // crash bursts from the middle
                 break;
+            case DrumType::Tom: spawnRipple(s < 4 ? 0.f : 7.f, 3.f, ORANGE, now, 9.f); break;  // toms/congas from a corner
+            case DrumType::Cowbell: spawnRipple(7.f, 0.f, YELLOW, now, 9.f); break;
             default: break;
         }
     }
-    if (sh_.bassPlaying.load() >= 0) env_[T_BASS] = std::max(env_[T_BASS], 0.65f);
+    if (sh_.bassPlaying.load() > -1000) env_[T_BASS] = std::max(env_[T_BASS], 0.65f);
     for (float& e : env_) e *= std::exp(-dt * 7.f);
 
     Color grid[8][8];
@@ -560,20 +705,21 @@ void Controller::render(double now, Frame& out) {
     for (int x = 0; x < 8; ++x)
         for (int y = 0; y < 4; ++y) grid[y][x] = cv[x][y];
 
-    const int p = sh_.pattern.load();
     const bool playing = sh_.playing.load();
     const int curStep = sh_.step.load();
 
     // EDIT view: 16 steps of the selected track on the top two rows.
     if (view_ == EDIT) {
+        const Color tc = slotColor(st, selTrack_);
         for (int s = 0; s < kSteps; ++s) {
             const int x = s % 8, y = s / 8;
-            const bool on = sh_.on[p][selTrack_][s].load() != 0;
+            const uint8_t v = sh_.on[p][selTrack_][s].load();
+            const bool on = stepSounds(v);
             Color c = (s % 4 == 0) ? DIM_RED : OFF;
+            if (stepKind(v) == STEP_TIE) c = scale(tc, 0.34f);
             if (on) {
-                c = selTrack_ == T_BASS
-                        ? Color{bassIdx(sh_.bassNote[p][s].load()) * 3.f / 7.f, 3.f}  // greener = lower
-                        : GREEN;
+                if (selTrack_ >= T_BASS) c = Color{sh_.note[p][selTrack_][s].load() * 3.f / 9.f, 3.f};  // redder = higher
+                else c = stepKind(v) == STEP_SOFT ? scale(tc, 0.5f) : tc;
             }
             if (playing && s == curStep) c = on ? AMBER : RED;
             if (s == heldStep_) c = frac(now * 6.0) < 0.5f ? AMBER : OFF;
@@ -581,28 +727,54 @@ void Controller::render(double now, Frame& out) {
         }
     }
 
-    // Row 4: drum pads flash on every hit, live or sequenced.
-    for (int x = 0; x < 8; ++x) {
-        float k = std::clamp(1.f - static_cast<float>((now - hitTime_[x]) / 0.18), 0.f, 1.f);
-        grid[4][x] = lerp(scale(kSoundColor[x], 0.34f), kSoundColor[x], k);
+    // Style picker (while View is held): one pad per style, current one blinks.
+    if (viewHeld_) {
+        for (int i = 0; i < 32; ++i) {
+            const int x = i % 8, y = i / 8;
+            Color c = OFF;
+            if (i < styleCount()) {
+                c = scale(ledToColor(styles()[static_cast<size_t>(i)].led), 0.5f);
+                if (i == styleIdx) c = frac(now * 3.0) < 0.5f ? ledToColor(styles()[static_cast<size_t>(i)].led) : DIM_AMBER;
+            }
+            grid[y][x] = c;
+        }
+    }
+    // Style just changed: a quick wipe across the top half in the new style's colour.
+    if (now - styleChangedAt_ < 0.5 && !viewHeld_) {
+        const float head = static_cast<float>((now - styleChangedAt_) / 0.5) * 10.f - 1.f;
+        const Color sc = ledToColor(st.led);
+        for (int x = 0; x < 8; ++x) {
+            float k = std::max(0.f, 1.f - std::fabs(x - head) / 1.5f);
+            for (int y = 0; y < 4; ++y) maxb(grid[y][x], scale(sc, k));
+        }
     }
 
-    // Row 5: bass pads.
+    // Row 4: drum pads (+ chord) flash on every hit, live or sequenced.
+    for (int x = 0; x < 8; ++x) {
+        const Color sc = slotColor(st, x);
+        float k = std::clamp(1.f - static_cast<float>((now - hitTime_[x]) / 0.18), 0.f, 1.f);
+        if (x == kChordSlot && chordPadHeld_) k = 1.f;
+        grid[4][x] = lerp(scale(sc, 0.34f), sc, k);
+    }
+
+    // Row 5: note pads in the style's scale.
     const int bassSemi = sh_.bassPlaying.load();
     for (int x = 0; x < 8; ++x) {
         Color c = (x == 0 || x == 7) ? DIM_AMBER : DIM_GREEN;
         if (view_ == EDIT && x == lastBassIdx_) c = {1.f, 2.f};
-        if (bassSemi == kBassScale[x]) c = GREEN;
-        if (bassPadHeld_[x]) c = AMBER;
+        if (bassSemi == degreeSemis(st, x)) c = GREEN;
+        if (bassPadSemi_[x] != -1000) c = AMBER;
         grid[5][x] = c;
     }
 
-    // Rows 6-7: effect pads, animated while held.
+    // Rows 6-7: effect pads (style's layout), animated while held.
     const double beat = beatSec();
-    for (int f = 0; f < FX_COUNT; ++f) {
-        const int x = f % 8, y = 6 + f / 8;
-        Color c = f < 8 ? DIM_RED : (f < 13 ? DIM_GREEN : DIM_AMBER);
-        if (fxHeld_[f]) {
+    for (int pad = 0; pad < 16; ++pad) {
+        const int x = pad % 8, y = 6 + pad / 8;
+        const int f = padFx_[pad] >= 0 ? padFx_[pad] : st.fx[static_cast<size_t>(pad)];
+        const Color base = fxColor(f);
+        Color c = scale(base, 0.34f);
+        if (f >= 0 && f < FX_COUNT && fxHeld_[f]) {
             const double t = now - fxPress_[f];
             if (f <= FX_STUT32) {
                 const double L = beat * 4.0 / kStutDiv[f];
@@ -611,9 +783,11 @@ void Controller::render(double now, Frame& out) {
                 c = {3.f, 3.f * sh_.tapeRate.load()};
             } else if (f == FX_RISER) {
                 c = scale(AMBER, 0.34f + 0.66f * sh_.riserAmt.load());
+            } else if (f == FX_GATE || f == FX_PUMP) {
+                c = scale(base, 0.3f + 0.7f * (1.f - sh_.beatPhase.load()));
             } else {
                 float pulse = 0.5f + 0.5f * std::sin(static_cast<float>(t) * kTwoPi * 4.f);
-                c = scale(kFxColor[f], 0.5f + 0.5f * pulse);
+                c = scale(base, 0.5f + 0.5f * pulse);
             }
         }
         grid[y][x] = c;
@@ -640,13 +814,15 @@ void Controller::render(double now, Frame& out) {
     // Top buttons.
     const int queued = sh_.queued.load();
     out[72] = quant(playing ? (curStep % 4 == 0 ? GREEN : DIM_GREEN) : Color{2.f, 0.f});
-    out[73] = quant(view_ == EDIT ? AMBER : DIM_GREEN);
+    out[73] = quant(viewHeld_ ? ledToColor(st.led) : (view_ == EDIT ? AMBER : DIM_GREEN));
     out[74] = quant(bpmHeld_ < 0 ? AMBER : DIM_AMBER);
     out[75] = quant(bpmHeld_ > 0 ? AMBER : DIM_AMBER);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < kSlots; ++i) {
         Color c = DIM_RED;
-        if (i == p) c = GREEN;
-        if (i == queued) c = frac(now * 4.0) < 0.5f ? AMBER : OFF;
+        if (styleIdx * kSlots + i == p) c = GREEN;
+        if (styleIdx * kSlots + i == queued) c = frac(now * 4.0) < 0.5f ? AMBER : OFF;
+        if (queued >= 0 && queued / kSlots != styleIdx && i == queued % kSlots)
+            c = frac(now * 4.0) < 0.5f ? ledToColor(styleOf(queued).led) : OFF;  // style change pending
         out[76 + i] = quant(c);
     }
 }
