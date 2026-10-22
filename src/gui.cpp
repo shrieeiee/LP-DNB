@@ -1653,7 +1653,7 @@ void drawAbout(App& app, GuiState& gs) {
     ImGui::TextColored(kHint, "A groovebox for the original Novation Launchpad Mini: 12 styles, synth and sampled drums,");
     ImGui::TextColored(kHint, "a lead synth for a second keyboard, songs, recording and MIDI export.");
     ImGui::Spacing();
-    ImGui::TextUnformatted("Made by shrieeiee, written with Claude (Anthropic).");
+    ImGui::TextUnformatted("Made by shrieeiee, written with Claude (Anthropic). MIT licence.");
     linkText("github.com/shrieeiee/LP-DNB", "https://github.com/shrieeiee/LP-DNB");
     ImGui::TextColored(kHint, "Not made by or affiliated with Novation. Launchpad is a trademark of Focusrite Audio Engineering Ltd.");
 

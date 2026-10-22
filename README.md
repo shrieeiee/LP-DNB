@@ -5,6 +5,8 @@
 <p align="center"><b>A groovebox for the original Novation Launchpad Mini</b> (the micro-USB mk1 / mk2)<br>
 12 styles &middot; 96 built-in patterns &middot; synth or sampled drums &middot; light shows on every pad</p>
 
+<p align="center"><a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-a78bfa" alt="MIT licence"></a></p>
+
 ![LP-DNB playing drum & bass](docs/screenshots/sequencer.png)
 
 LP-DNB turns the old Launchpad Mini into a self-contained beat machine. Pick a style (drum & bass, house,
@@ -434,7 +436,8 @@ pat("Two-step", {"x.........x.....",   // drums: x hit  X accent  o ghost  r 2-h
 
 ## Credits and licences
 
-LP-DNB is made by [shrieeiee](https://github.com/shrieeiee), written with Claude (Anthropic).
+LP-DNB is made by [shrieeiee](https://github.com/shrieeiee), written with Claude (Anthropic), and released
+under the [MIT licence](LICENSE): use it, change it and share it, keeping the copyright notice.
 
 It's built on these, each under its own licence (full texts in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt),
 in each library's folder under `third_party/`, and in the app's **About** tab):

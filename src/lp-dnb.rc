@@ -18,7 +18,7 @@ BEGIN
       VALUE "FileDescription", "LP-DNB groovebox for Novation Launchpad Mini"
       VALUE "FileVersion", "1.2.0"
       VALUE "InternalName", "LP-DNB"
-      VALUE "LegalCopyright", "LP-DNB by shrieeiee. Uses Dear ImGui (MIT), RtMidi (MIT), miniaudio (MIT-0 / public domain), Nunito font (SIL OFL 1.1)."
+      VALUE "LegalCopyright", "Copyright (c) 2026 shrieeiee, MIT licence. Uses Dear ImGui (MIT), RtMidi (MIT), miniaudio (MIT-0 / public domain), Nunito font (SIL OFL 1.1)."
       VALUE "OriginalFilename", "LP-DNB.exe"
       VALUE "ProductName", "LP-DNB"
       VALUE "ProductVersion", "1.2.0"

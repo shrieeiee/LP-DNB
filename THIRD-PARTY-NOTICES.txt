@@ -1,7 +1,8 @@
 LP-DNB - third-party notices
 ============================
 
-LP-DNB includes the following software and font. Each keeps its own licence,
+LP-DNB itself is (c) 2026 shrieeiee under the MIT licence (see LICENSE).
+It includes the following software and font. Each keeps its own licence,
 reproduced in full below. Thank you to their authors.
 
   Dear ImGui 1.91.9b ..... Omar Cornut and contributors ... MIT licence
