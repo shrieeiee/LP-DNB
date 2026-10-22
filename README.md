@@ -7,8 +7,8 @@ each have their own light pattern on the pads.
 
 ## Build
 
-You need CMake (3.16+), a C++17 compiler and git. The two dependencies (RtMidi for MIDI,
-miniaudio for audio) are downloaded automatically when you configure.
+You need CMake (3.16+) and a C++17 compiler. The two libraries it uses (RtMidi for MIDI,
+miniaudio for audio) are included in `third_party/`, so there is nothing else to download.
 
 **Windows (Visual Studio 2019/2022, "Desktop development with C++")**
 
@@ -17,6 +17,10 @@ cmake -S . -B build
 cmake --build build --config Release
 build\Release\lp-dnb.exe
 ```
+
+Using the CMake GUI instead: set "Where to build the binaries" to a `build` folder **inside** the
+project (e.g. `.../lp-dnb/build`), not the project folder itself. Press Configure, then Generate,
+then Open Project and build the `Release` configuration in Visual Studio.
 
 **macOS**
 

@@ -7,20 +7,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Dependencies are downloaded at configure time. We only take their sources
-# (SOURCE_SUBDIR points nowhere so their own build systems are not run).
-include(FetchContent)
-FetchContent_Declare(rtmidi
-  GIT_REPOSITORY https://github.com/thestk/rtmidi.git
-  GIT_TAG 6.0.0
-  GIT_SHALLOW TRUE
-  SOURCE_SUBDIR _none_)
-FetchContent_Declare(miniaudio
-  GIT_REPOSITORY https://github.com/mackron/miniaudio.git
-  GIT_TAG 0.11.22
-  GIT_SHALLOW TRUE
-  SOURCE_SUBDIR _none_)
-FetchContent_MakeAvailable(rtmidi miniaudio)
+# RtMidi (MIDI) and miniaudio (audio) are bundled in third_party/, so no
+# downloads or Git are needed to build.
+set(rtmidi_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/rtmidi)
+set(miniaudio_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniaudio)
 
 add_executable(lp-dnb
   src/main.cpp
