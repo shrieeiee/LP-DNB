@@ -2,7 +2,10 @@
 // Used by both the GUI and the console front-ends. All methods are called
 // from the main/UI thread.
 #pragma once
+#include <atomic>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,17 +38,17 @@ public:
     void virtualPress(int x, int y, bool down);
 
     // Audio output devices (refreshed every few seconds).
-    const std::vector<std::string>& audioDevices() const { return audioNames_; }
-    const std::string& preferredAudio() const { return preferredAudio_; }  // "" = system default
+    std::vector<std::string> audioDevices() const;
+    std::string preferredAudio() const;  // "" = system default
     void selectAudio(const std::string& name);                               // "" = system default
-    const std::string& audioStatus() const { return audioStatus_; }
+    std::string audioStatus() const;
     bool audioRunning() const;
     // Lower buffer = less delay between pressing a pad and hearing it (more CPU risk).
-    int audioBuffer() const { return audioBuffer_; }
+    int audioBuffer() const { std::lock_guard<std::mutex> lk(audioMu_); return audioBuffer_; }
     void setAudioBuffer(int frames);
-    bool audioExclusive() const { return audioExclusive_; }  // Windows WASAPI exclusive mode
+    bool audioExclusive() const { std::lock_guard<std::mutex> lk(audioMu_); return audioExclusive_; }  // WASAPI exclusive
     void setAudioExclusive(bool on);
-    double audioLatencyMs() const { return latencyMs_; }
+    double audioLatencyMs() const;
 
     // ---- Sampled drums: any drum sound can be a WAV instead of the synth.
     // path "" = back to the synth. Returns false (and sets err) if it couldn't load.
@@ -90,6 +93,7 @@ public:
 
 private:
     struct Audio;
+    void audioLoop(bool nullAudio);  // the audio thread
     bool refreshAudioDevices();  // true if the list changed
     void openAudio();
     void handleKeyboard(const std::vector<unsigned char>& m, int route);
@@ -106,10 +110,13 @@ private:
     std::unique_ptr<Audio> audio_;
     Frame frame_{};
     double nextLed_ = 0.0;
-    double nextAudioScan_ = 0.0;
 
+    // Audio device state: written by the audio thread, guarded by audioMu_.
+    mutable std::mutex audioMu_;
+    std::thread audioThread_;
+    std::atomic<bool> audioQuit_{false}, audioReopen_{false}, audioRunning_{false};
     std::vector<std::string> audioNames_;
-    std::string preferredAudio_, openedAudio_, audioStatus_;
+    std::string preferredAudio_, openedAudio_, audioStatus_ = "Starting audio...";
 
     std::vector<std::pair<int, int>> kbNotes_;  // (MIDI note, semitone sent) held on keyboards
     size_t kbOpenCount_ = 0;

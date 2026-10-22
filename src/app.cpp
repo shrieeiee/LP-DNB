@@ -130,6 +130,44 @@ App::App(bool nullAudio)
     sh_->send(Cmd::LeadPatch, leadPatch_);
     audio_->engine = engine_.get();
 
+    // Everything that talks to the audio device (opening, closing, listing devices)
+    // runs on its own thread. Windows audio calls can stall for seconds when a
+    // device sleeps or disappears (monitor speakers turning off, Bluetooth
+    // dropping out...), and doing that here would freeze the window.
+    audioThread_ = std::thread([this, nullAudio] { audioLoop(nullAudio); });
+}
+
+App::~App() {
+    if (recording_) stopRecording();
+    saveNow();
+    clock_.reset();
+    audioQuit_ = true;
+    if (audioThread_.joinable()) audioThread_.join();
+}
+
+bool App::audioRunning() const { return audioRunning_.load(); }
+
+std::vector<std::string> App::audioDevices() const {
+    std::lock_guard<std::mutex> lk(audioMu_);
+    return audioNames_;
+}
+std::string App::preferredAudio() const {
+    std::lock_guard<std::mutex> lk(audioMu_);
+    return preferredAudio_;
+}
+std::string App::audioStatus() const {
+    std::lock_guard<std::mutex> lk(audioMu_);
+    return audioStatus_;
+}
+double App::audioLatencyMs() const {
+    std::lock_guard<std::mutex> lk(audioMu_);
+    return latencyMs_;
+}
+
+// ------------------------------------------------------------------ audio --
+// (audio thread only below, except the setters at the end)
+
+void App::audioLoop(bool nullAudio) {
     ma_result r;
     if (nullAudio) {
         ma_backend nb[] = {ma_backend_null};
@@ -139,26 +177,49 @@ App::App(bool nullAudio)
     }
     audio_->ctxOk = r == MA_SUCCESS;
     if (!audio_->ctxOk) {
-        audioStatus_ = "No audio system available";
-        logf("%s", audioStatus_.c_str());
+        {
+            std::lock_guard<std::mutex> lk(audioMu_);
+            audioStatus_ = "No audio system available";
+        }
+        logf("No audio system available");
         return;
     }
     refreshAudioDevices();
     openAudio();
-    nextAudioScan_ = monotonicSec() + 3.0;
-}
-
-App::~App() {
-    if (recording_) stopRecording();
-    saveNow();
-    clock_.reset();
+    double nextScan = monotonicSec() + 3.0;
+    while (!audioQuit_.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const double now = monotonicSec();
+        if (audio_->lost.load()) {
+            audioRunning_ = false;
+            logf("Audio output lost%s", preferredAudio().empty() ? ", reopening" : ", switching to system default");
+            refreshAudioDevices();
+            openAudio();
+            nextScan = now + 3.0;
+        } else if (audioReopen_.exchange(false)) {
+            openAudio();
+            nextScan = now + 3.0;
+        } else if (now >= nextScan) {
+            const bool changed = refreshAudioDevices();
+            // Preferred device came back (or default was in use while it was away).
+            std::string pref, opened;
+            bool prefPresent;
+            {
+                std::lock_guard<std::mutex> lk(audioMu_);
+                pref = preferredAudio_;
+                opened = openedAudio_;
+                prefPresent = std::find(audioNames_.begin(), audioNames_.end(), pref) != audioNames_.end();
+            }
+            if (!pref.empty() && prefPresent && opened != pref) openAudio();
+            else if (!audioRunning_.load() && changed) openAudio();  // something was plugged in: try again
+            nextScan = monotonicSec() + 3.0;
+        }
+        if (audio_->devOk) audioRunning_ = ma_device_is_started(&audio_->dev) != MA_FALSE;
+    }
     audio_->close();
-    if (audio_->ctxOk) ma_context_uninit(&audio_->ctx);
+    audioRunning_ = false;
+    ma_context_uninit(&audio_->ctx);
 }
-
-bool App::audioRunning() const { return audio_->devOk && ma_device_is_started(&audio_->dev); }
-
-// ------------------------------------------------------------------ audio --
 
 bool App::refreshAudioDevices() {
     ma_device_info* infos = nullptr;
@@ -170,6 +231,7 @@ bool App::refreshAudioDevices() {
         names.emplace_back(infos[i].name);
         ids.push_back(infos[i].id);
     }
+    std::lock_guard<std::mutex> lk(audioMu_);
     const bool changed = names != audioNames_;
     if (changed) {
         for (const auto& n : names)
@@ -182,85 +244,115 @@ bool App::refreshAudioDevices() {
 }
 
 void App::openAudio() {
+    audioRunning_ = false;
     audio_->close();
     audio_->lost = false;
 
-    const ma_device_id* id = nullptr;
-    std::string target;
-    if (!preferredAudio_.empty()) {
-        auto it = std::find(audioNames_.begin(), audioNames_.end(), preferredAudio_);
-        if (it != audioNames_.end()) {
-            id = &audio_->ids[static_cast<size_t>(it - audioNames_.begin())];
-            target = preferredAudio_;
+    std::string pref, target, lastStatus;
+    int buffer;
+    bool exclusive;
+    ma_device_id idCopy{};
+    bool haveId = false;
+    {
+        std::lock_guard<std::mutex> lk(audioMu_);
+        pref = preferredAudio_;
+        buffer = audioBuffer_;
+        exclusive = audioExclusive_;
+        lastStatus = audioStatus_;
+        if (!pref.empty()) {
+            auto it = std::find(audioNames_.begin(), audioNames_.end(), pref);
+            if (it != audioNames_.end() && static_cast<size_t>(it - audioNames_.begin()) < audio_->ids.size()) {
+                idCopy = audio_->ids[static_cast<size_t>(it - audioNames_.begin())];
+                haveId = true;
+                target = pref;
+            }
         }
     }
 
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
-    cfg.playback.pDeviceID = id;
+    cfg.playback.pDeviceID = haveId ? &idCopy : nullptr;
     cfg.playback.format = ma_format_f32;
     cfg.playback.channels = 2;
     cfg.sampleRate = kSampleRate;
-    cfg.periodSizeInFrames = static_cast<ma_uint32>(audioBuffer_);
+    cfg.periodSizeInFrames = static_cast<ma_uint32>(buffer);
     cfg.performanceProfile = ma_performance_profile_low_latency;
-    cfg.playback.shareMode = audioExclusive_ ? ma_share_mode_exclusive : ma_share_mode_shared;
+    cfg.playback.shareMode = exclusive ? ma_share_mode_exclusive : ma_share_mode_shared;
     cfg.dataCallback = &Audio::dataCb;
     cfg.notificationCallback = &Audio::notifyCb;
     cfg.pUserData = audio_.get();
 
+    auto fail = [&](const std::string& msg) {
+        if (msg != lastStatus) logf("%s", msg.c_str());  // don't repeat every retry
+        std::lock_guard<std::mutex> lk(audioMu_);
+        audioStatus_ = msg;
+        openedAudio_.clear();
+    };
     bool exclusiveFailed = false;
     ma_result ir = ma_device_init(&audio_->ctx, &cfg, &audio_->dev);
-    if (ir != MA_SUCCESS && audioExclusive_) {  // exclusive refused (device busy / format): fall back
+    if (ir != MA_SUCCESS && exclusive) {  // exclusive refused (device busy / format): fall back
         exclusiveFailed = true;
         cfg.playback.shareMode = ma_share_mode_shared;
         ir = ma_device_init(&audio_->ctx, &cfg, &audio_->dev);
     }
     if (ir != MA_SUCCESS) {
-        const std::string msg = "Couldn't open audio output" + (target.empty() ? std::string() : ": " + target);
-        if (msg != audioStatus_) logf("%s", msg.c_str());  // don't repeat every retry
-        audioStatus_ = msg;
-        openedAudio_.clear();
+        fail("Couldn't open audio output" + (target.empty() ? std::string() : ": " + target));
         return;
     }
     audio_->devOk = true;
     if (ma_device_start(&audio_->dev) != MA_SUCCESS) {
         audio_->close();
-        if (audioStatus_ != "Couldn't start audio output") logf("Couldn't start audio output");
-        audioStatus_ = "Couldn't start audio output";
-        openedAudio_.clear();
+        fail("Couldn't start audio output");
         return;
     }
-    openedAudio_ = target;
     char name[256] = {};
     ma_device_get_name(&audio_->dev, ma_device_type_playback, name, sizeof name, nullptr);
-    audioStatus_ = std::string(target.empty() ? "System default: " : "") + name;
+    std::string status = std::string(target.empty() ? "System default: " : "") + name;
     const ma_uint32 period = audio_->dev.playback.internalPeriodSizeInFrames;
     const ma_uint32 periods = std::max<ma_uint32>(1, audio_->dev.playback.internalPeriods);
     const ma_uint32 rate = audio_->dev.playback.internalSampleRate ? audio_->dev.playback.internalSampleRate : kSampleRate;
-    latencyMs_ = 1000.0 * period * periods / rate;
-    if (exclusiveFailed) audioStatus_ += " (exclusive mode refused, using shared)";
-    else if (audioExclusive_) audioStatus_ += " (exclusive)";
-    logf("Audio output: %s, %u-frame buffer, about %.1f ms", audioStatus_.c_str(), period, latencyMs_);
+    const double lat = 1000.0 * period * periods / rate;
+    if (exclusiveFailed) status += " (exclusive mode refused, using shared)";
+    else if (exclusive) status += " (exclusive)";
+    {
+        std::lock_guard<std::mutex> lk(audioMu_);
+        openedAudio_ = target;
+        audioStatus_ = status;
+        latencyMs_ = lat;
+    }
+    audioRunning_ = true;
+    logf("Audio output: %s, %u-frame buffer, about %.1f ms", status.c_str(), period, lat);
 }
+
+// Setters (main thread): change the settings, the audio thread reopens.
 
 void App::setAudioBuffer(int frames) {
     frames = std::max(32, std::min(2048, frames));
-    if (frames == audioBuffer_) return;
-    audioBuffer_ = frames;
-    if (audio_->ctxOk) openAudio();
+    {
+        std::lock_guard<std::mutex> lk(audioMu_);
+        if (frames == audioBuffer_) return;
+        audioBuffer_ = frames;
+    }
+    audioReopen_ = true;
     nextSave_ = 0.0;
 }
 
 void App::setAudioExclusive(bool on) {
-    if (on == audioExclusive_) return;
-    audioExclusive_ = on;
-    if (audio_->ctxOk) openAudio();
+    {
+        std::lock_guard<std::mutex> lk(audioMu_);
+        if (on == audioExclusive_) return;
+        audioExclusive_ = on;
+    }
+    audioReopen_ = true;
     nextSave_ = 0.0;
 }
 
 void App::selectAudio(const std::string& name) {
-    if (name == preferredAudio_ && audioRunning()) return;
-    preferredAudio_ = name;
-    openAudio();
+    {
+        std::lock_guard<std::mutex> lk(audioMu_);
+        if (name == preferredAudio_ && audioRunning_.load()) return;
+        preferredAudio_ = name;
+    }
+    audioReopen_ = true;
 }
 
 // ------------------------------------------------------------- keyboards --
@@ -682,15 +774,18 @@ Settings App::currentSettings() const {
     st.patternName = sh_->patternName[p];
     st.bpm = sh_->bpm.load();
     st.volume = sh_->volume.load();
-    st.audioDevice = preferredAudio_;
+    st.audioDevice = preferredAudio();
     st.leadPatch = leadPatches()[static_cast<size_t>(leadPatch_)].name;
     st.leadVolume = sh_->leadVolume.load();
     st.leadOctave = leadOctave_;
     st.leadSnap = leadSnap_;
     st.routes = midi_->routes();
     st.disabledInputs = midi_->disabledInputs();
-    st.audioBuffer = audioBuffer_;
-    st.audioExclusive = audioExclusive_;
+    {
+        std::lock_guard<std::mutex> lk(audioMu_);
+        st.audioBuffer = audioBuffer_;
+        st.audioExclusive = audioExclusive_;
+    }
     st.clockOut = clock_->port();
     st.clockIn = midi_->clockIn();
     for (int si = 0; si < styleCount() && si < kMaxStyles; ++si)
@@ -761,6 +856,7 @@ void App::virtualPress(int x, int y, bool down) {
 }
 
 void App::tick(double now) {
+    uiPhase() = "handling MIDI input";
     for (auto& m : midi_->takeMessages()) {
         if (m.source == MidiMsg::LAUNCHPAD) ctl_->onMidi(m.bytes, now);
         else if (m.source == MidiMsg::CLOCK) {
@@ -780,6 +876,7 @@ void App::tick(double now) {
         if (now >= retired_[i].first) retired_.erase(retired_.begin() + static_cast<long>(i));
         else ++i;
     }
+    uiPhase() = "scanning MIDI devices";
     if (midi_->poll(now)) ctl_->releaseAll(now);
 
     size_t open = 0;
@@ -789,10 +886,12 @@ void App::tick(double now) {
 
     // Autosave: patterns and settings are written whenever they change (checked every 2 s).
     if (now >= nextSave_) {
+        uiPhase() = "autosaving";
         nextSave_ = now + 2.0;
         saveNow();
     }
 
+    uiPhase() = "updating Launchpad lights";
     ctl_->update(now);
     if (now >= nextLed_) {
         ctl_->render(now, frame_);
@@ -801,20 +900,6 @@ void App::tick(double now) {
         if (nextLed_ < now) nextLed_ = now + 1.0 / 30.0;
     }
 
-    if (!audio_->ctxOk) return;
-    if (audio_->lost.load()) {
-        logf("Audio output lost%s", preferredAudio_.empty() ? ", reopening" : ", switching to system default");
-        refreshAudioDevices();
-        openAudio();
-        nextAudioScan_ = now + 3.0;
-    } else if (now >= nextAudioScan_) {
-        nextAudioScan_ = now + 3.0;
-        const bool changed = refreshAudioDevices();
-        // Preferred device came back (or default was in use while it was away).
-        const bool prefPresent = std::find(audioNames_.begin(), audioNames_.end(), preferredAudio_) != audioNames_.end();
-        if (!preferredAudio_.empty() && prefPresent && openedAudio_ != preferredAudio_) openAudio();
-        else if (!audioRunning() && changed) openAudio();  // something was plugged in: try again
-    }
 }
 
 }  // namespace dnb

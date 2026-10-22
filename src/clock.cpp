@@ -53,7 +53,9 @@ void MidiClockOut::run() {
     bool wasPlaying = false;
     long long sent = 0;
     while (!quit_.load()) {
-        std::this_thread::sleep_for(std::chrono::microseconds(500));
+        // Idle: check rarely. Sending: every millisecond (sleeping less than that on
+        // Windows becomes a busy loop that eats a whole CPU core).
+        std::this_thread::sleep_for(std::chrono::milliseconds(open_.load() ? 1 : 50));
         std::lock_guard<std::mutex> lk(mu_);
         if (!out_ || !open_.load()) { wasPlaying = false; continue; }
         auto send1 = [&](unsigned char b) {

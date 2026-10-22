@@ -15,9 +15,13 @@ public:
         static Log l;
         return l;
     }
+    // The window version has no console; writing to a stdout nobody reads can block.
+    void setEcho(bool on) { echo_ = on; }
     void add(const std::string& s) {
-        std::printf("%s\n", s.c_str());
-        std::fflush(stdout);
+        if (echo_) {
+            std::printf("%s\n", s.c_str());
+            std::fflush(stdout);
+        }
         std::lock_guard<std::mutex> lk(mu_);
         lines_.push_back(s);
         while (lines_.size() > 200) lines_.pop_front();
@@ -37,6 +41,7 @@ private:
     std::mutex mu_;
     std::deque<std::string> lines_;
     unsigned serial_ = 0;
+    bool echo_ = true;
 };
 
 inline void logf(const char* fmt, ...) {

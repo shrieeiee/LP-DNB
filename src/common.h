@@ -18,6 +18,12 @@ inline double monotonicSec() {
     return duration<double>(steady_clock::now() - t0).count();
 }
 
+// What the main (UI) thread is doing right now, for the freeze watchdog.
+inline std::atomic<const char*>& uiPhase() {
+    static std::atomic<const char*> p{"starting"};
+    return p;
+}
+
 constexpr int kTracks = 9;          // 6 drum tracks + bass + chords + lead
 constexpr int kPadTracks = 8;       // tracks on the Launchpad's right-hand column (not the lead)
 constexpr int kSteps = 16;          // steps per bar (one Launchpad page / GUI page)

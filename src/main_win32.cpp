@@ -4,9 +4,15 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <mmsystem.h>
 #include <d3d11.h>
 
+#include <atomic>
+#include <cstdio>
+#include <ctime>
+#include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <algorithm>
@@ -18,6 +24,8 @@
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
+#include "log.h"
+#include "storage.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -75,6 +83,33 @@ void cleanupDevice() {
     if (gSwapChain) { gSwapChain->Release(); gSwapChain = nullptr; }
     if (gContext) { gContext->Release(); gContext = nullptr; }
     if (gDevice) { gDevice->Release(); gDevice = nullptr; }
+}
+
+// Freeze watchdog: if the window stops updating for a few seconds, write down
+// what it was doing to lp-dnb-freeze-log.txt next to the save file, so a hang
+// that only happens after a long time can be tracked down.
+std::atomic<double> gHeartbeat{0.0};
+std::atomic<bool> gWatchQuit{false};
+
+void watchdog() {
+    bool reported = false;
+    while (!gWatchQuit.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        const double stalled = dnb::monotonicSec() - gHeartbeat.load();
+        if (stalled < 4.0) { reported = false; continue; }
+        if (reported) continue;
+        reported = true;
+        try {
+            const auto path = std::filesystem::u8path(dnb::dataFilePath()).parent_path() / "lp-dnb-freeze-log.txt";
+            std::filesystem::create_directories(path.parent_path());
+            if (FILE* f = _wfopen(path.wstring().c_str(), L"a")) {
+                std::fprintf(f, "%s  window stopped updating while: %s (running %.0f s)\n", dnb::timeStamp().c_str(),
+                             dnb::uiPhase().load(), dnb::monotonicSec());
+                std::fclose(f);
+            }
+        } catch (...) {
+        }
+    }
 }
 
 LRESULT WINAPI wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -140,6 +175,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
             FreeConsole();
         }
     }
+    dnb::Log::get().setEcho(false);  // no console to print to
+    timeBeginPeriod(1);              // 1 ms sleeps: smooth frame pacing and MIDI clock
+    gHeartbeat = dnb::monotonicSec();
+    std::thread watch(watchdog);
     ImGui_ImplWin32_EnableDpiAwareness();
     const float dpi = ImGui_ImplWin32_GetDpiScaleForMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
 
@@ -191,7 +230,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
     dnb::App app;
 
     bool done = false;
+    double frameStart = dnb::monotonicSec();
     while (!done) {
+        gHeartbeat = dnb::monotonicSec();
+        dnb::uiPhase() = "handling window messages";
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -208,6 +250,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
             Sleep(5);
             continue;
         }
+        dnb::uiPhase() = "drawing";
         gOccluded = false;
 
         if (gResizeW != 0 && gResizeH != 0) {
@@ -230,10 +273,28 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
         gContext->ClearRenderTargetView(gRtv, clear);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
-        HRESULT hr = gSwapChain->Present(1, 0);  // vsync
+        // No vsync wait: with the screen asleep there's no vsync, and waiting for it can
+        // hang. Pace to about 60 frames a second ourselves instead.
+        dnb::uiPhase() = "presenting the frame";
+        HRESULT hr = gSwapChain->Present(0, 0);
         gOccluded = hr == DXGI_STATUS_OCCLUDED;
+        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+            // Graphics driver restarted (it happens after sleep): rebuild the device.
+            ImGui_ImplDX11_Shutdown();
+            cleanupDevice();
+            if (!createDevice(hwnd)) { Sleep(500); continue; }
+            ImGui_ImplDX11_Init(gDevice, gContext);
+        }
+        dnb::uiPhase() = "idle";
+        const double target = frameStart + 1.0 / 60.0;
+        double t = dnb::monotonicSec();
+        if (t < target) Sleep(static_cast<DWORD>((target - t) * 1000.0));
+        frameStart = std::max(target, dnb::monotonicSec() - 0.05);
     }
 
+    gWatchQuit = true;
+    watch.join();
+    timeEndPeriod(1);
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
