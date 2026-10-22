@@ -18,7 +18,7 @@ inline double monotonicSec() {
     return duration<double>(steady_clock::now() - t0).count();
 }
 
-constexpr const char* kVersion = "1.2.0";
+constexpr const char* kVersion = "1.3.0";
 
 // What the main (UI) thread is doing right now, for the freeze watchdog.
 inline std::atomic<const char*>& uiPhase() {

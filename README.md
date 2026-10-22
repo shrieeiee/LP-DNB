@@ -29,6 +29,8 @@ Launchpad remaps itself: a drum kit, a bass in the style's key, chord stabs, and
   it into the pattern.
 - **Record and export**: record to WAV, export patterns as MIDI files, sync with other gear by MIDI clock.
 - **Windows app** with an on-screen Launchpad you can click, plus a console version for macOS and Linux.
+- **lp-tenori**, a second program: a Tenori-on style sequencer with 8 layers, each with its own instrument,
+  playing in Score, Bounce, Path or Push mode ([more below](#lp-tenori-a-tenori-on-on-the-launchpad)).
 
 | | |
 |---|---|
@@ -39,8 +41,16 @@ Launchpad remaps itself: a drum kit, a bass in the style's key, chord stabs, and
 
 ## Getting it
 
-**Windows**: build it with the steps under [Build](#build) (Visual Studio 2019/2022 and CMake). The result
-is a single `LP-DNB.exe`; keep `THIRD-PARTY-NOTICES.txt` with it if you pass it on.
+**Windows**: download `LP-DNB-windows.zip` from the [latest release](https://github.com/shrieeiee/LP-DNB/releases/latest),
+unzip it anywhere and double-click `lp-dnb.exe` (or `lp-tenori.exe`). Nothing to install. The programs aren't
+signed, so the first time Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
+
+Or build it yourself with the steps under [Build](#build) (Visual Studio 2019/2022 and CMake). Keep
+`THIRD-PARTY-NOTICES.txt` with the programs if you pass them on.
+
+If a window ever stops responding, wait ten seconds and look in `%APPDATA%\LP-DNB` for
+`lp-dnb-freeze-log.txt` or `lp-tenori-freeze-log.txt`: it records what the program was doing (including where
+in the code), which makes it quick to fix. Please attach it to an issue.
 
 **macOS / Linux**: the same steps build the console version.
 
@@ -291,6 +301,10 @@ and sampled drums are there, and every layer can also have **its own synth** (17
 synths and the style's chord sound). Every note sends a ripple of light out across the grid in its layer's colour.
 
 ![lp-tenori on Windows](docs/lp-tenori.png)
+
+| | | |
+|---|---|---|
+| ![Bounce](docs/screenshots/tenori-bounce.png) **Bounce**: balls in flight; higher repeats slower | ![Path](docs/screenshots/tenori-path.png) **Path**: the light travels the route you draw | ![Instrument picker](docs/screenshots/tenori-picker.png) **Instrument picker**: every layer its own sound |
 
 ### The window (Windows)
 
