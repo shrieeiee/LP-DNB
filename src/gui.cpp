@@ -21,6 +21,7 @@
 #include "app.h"
 #include "imgui.h"
 #include "log.h"
+#include "notices_data.h"
 #include "styles.h"
 
 namespace dnb {
@@ -1621,6 +1622,71 @@ void drawDevices(App& app, GuiState& gs, double now) {
 #endif
 }
 
+
+// ---------------------------------------------------------------- about --
+
+void openUrl(const char* url) {
+#ifdef _WIN32
+    ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+#else
+    (void)url;
+#endif
+}
+
+void linkText(const char* label, const char* url) {
+    ImGui::TextColored(kLilac, "%s", label);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        ImGui::SetTooltip("%s", url);
+    }
+    if (ImGui::IsItemClicked()) openUrl(url);
+}
+
+void drawAbout(App& app, GuiState& gs) {
+    (void)app;
+    const float s = gs.scale;
+    ImFont* big = gs.bigFont ? gs.bigFont : ImGui::GetFont();
+    ImGui::PushFont(big);
+    ImGui::Text("LP-DNB %s", kVersion);
+    ImGui::PopFont();
+    ImGui::TextColored(kHint, "A groovebox for the original Novation Launchpad Mini: 12 styles, synth and sampled drums,");
+    ImGui::TextColored(kHint, "a lead synth for a second keyboard, songs, recording and MIDI export.");
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Made by shrieeiee, written with Claude (Anthropic).");
+    linkText("github.com/shrieeiee/LP-DNB", "https://github.com/shrieeiee/LP-DNB");
+    ImGui::TextColored(kHint, "Not made by or affiliated with Novation. Launchpad is a trademark of Focusrite Audio Engineering Ltd.");
+
+    ImGui::SeparatorText("Built with");
+    struct Credit { const char* name; const char* who; const char* licence; const char* url; };
+    static const Credit credits[] = {
+        {"Dear ImGui 1.91.9b", "Omar Cornut and contributors", "MIT", "https://github.com/ocornut/imgui"},
+        {"stb_truetype, stb_textedit, stb_rect_pack", "Sean Barrett (inside Dear ImGui)", "MIT / public domain", "https://github.com/nothings/stb"},
+        {"RtMidi 6.0.0", "Gary P. Scavone", "MIT", "https://github.com/thestk/rtmidi"},
+        {"miniaudio 0.11.22", "David Reid", "MIT-0 / public domain", "https://miniaud.io"},
+        {"Nunito font", "Vernon Adams, Jacques Le Bailly, Manvel Shmavonyan, Alexei Vanyashin", "SIL Open Font License 1.1",
+         "https://github.com/googlefonts/nunito"},
+    };
+    for (const Credit& c : credits) {
+        ImGui::PushID(c.name);
+        linkText(c.name, c.url);
+        ImGui::SameLine();
+        ImGui::TextColored(kHint, " %s  -  %s", c.who, c.licence);
+        ImGui::PopID();
+    }
+    ImGui::Spacing();
+    ImGui::TextColored(kHint, "The built-in patterns follow well-known grooves; the articles they were checked against are listed in the README.");
+
+    ImGui::SeparatorText("Licences");
+    ImGui::TextColored(kHint, "The full licence texts (also in THIRD-PARTY-NOTICES.txt next to the program):");
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(kWell));
+    ImGui::BeginChild("notices", ImVec2(0, std::max(160 * s, ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::PushFont(gs.smallFont ? gs.smallFont : ImGui::GetFont());
+    ImGui::TextUnformatted(kThirdPartyNotices);
+    ImGui::PopFont();
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+}
+
 void handleKeys(App& app, GuiState& gs) {
     ImGuiIO& io = ImGui::GetIO();
     if (io.WantTextInput) return;
@@ -1757,10 +1823,10 @@ void drawGui(App& app, GuiState& gs, double now) {
     if (gs.forceTab >= 0) gs.tab = gs.forceTab;
     gs.forceTab = -1;
     {
-        const char* names[7] = {"Sequencer", "Mixer", "Effects", "Song", "Instrument", "Styles", "Devices"};
+        const char* names[8] = {"Sequencer", "Mixer", "Effects", "Song", "Instrument", "Styles", "Devices", "About"};
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(18 * s, 10 * s));
         const float maxX = ImGui::GetCursorScreenPos().x + stableAvailX();
-        for (int i = 0; i < 7; ++i) {
+        for (int i = 0; i < 8; ++i) {
             const float w = ImGui::CalcTextSize(names[i]).x + 36 * s;
             if (i && ImGui::GetItemRectMax().x + 6 * s + w <= maxX) ImGui::SameLine(0, 6 * s);  // wraps when narrow
             if (coloredButton(names[i], kLilac, ImVec2(0, 0), gs.tab == i)) gs.tab = i;
@@ -1775,7 +1841,8 @@ void drawGui(App& app, GuiState& gs, double now) {
         case 3: drawSong(app, gs); break;
         case 4: drawInstrument(app, gs); break;
         case 5: drawStyles(app, gs); break;
-        default: drawDevices(app, gs, now); break;
+        case 6: drawDevices(app, gs, now); break;
+        default: drawAbout(app, gs); break;
     }
     ImGui::EndChild();
 

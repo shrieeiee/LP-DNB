@@ -1,17 +1,48 @@
-# lp-dnb
+<p align="center"><img src="assets/icon/lp-dnb.png" width="128" alt="LP-DNB icon"></p>
 
-A multi-style groovebox for the original Novation **Launchpad Mini** (micro-USB, mk1/mk2), written in C++17.
-It started as drum & bass and now has **12 styles and 96 built-in patterns**. Each style has its own drum kit,
-bass synth, chord sound, key, swing and effects, and the Launchpad remaps itself for each one.
-Everything is synthesised live by default, and any drum can be swapped for a WAV sample of your own.
-Every effect has its own light pattern on the pads.
+<h1 align="center">LP-DNB</h1>
 
-![LP-DNB on Windows](docs/screenshot.png)
+<p align="center"><b>A groovebox for the original Novation Launchpad Mini</b> (the micro-USB mk1 / mk2)<br>
+12 styles &middot; 96 built-in patterns &middot; synth or sampled drums &middot; light shows on every pad</p>
 
-You can make your own named patterns (up to 4 bars) under any style, chain them into a song, and they're
-saved between sessions. A second MIDI keyboard can play a lead synth over the top, with a choice of 17
-sounds, and you can record what you play into the pattern. Record the output to WAV, export patterns as
-MIDI files, and sync to other gear with MIDI clock.
+![LP-DNB playing drum & bass](docs/screenshots/sequencer.png)
+
+LP-DNB turns the old Launchpad Mini into a self-contained beat machine. Pick a style (drum & bass, house,
+techno, hip-hop, trap, dubstep, UK garage, reggaeton, disco, synthwave, lo-fi or afro house) and the
+Launchpad remaps itself: a drum kit, a bass in the style's key, chord stabs, and sixteen performance effects
+(stutters, tape stop, filter sweeps, sirens, risers...), each with its own animated light pattern.
+
+**What it does**
+
+- **Plays and lights up**: drums, bass, chords and effects on the pads, with ripples, meters and per-effect
+  light shows. Unplug and replug the Launchpad any time; it reconnects by itself.
+- **12 styles, 96 patterns**: each style has its own sounds, key, swing and effect layout. Every built-in
+  pattern is two bars with fills and variations.
+- **Sequencer**: up to 4-bar patterns, accents, ghost notes, rolls, slides, holds and per-step pitch /
+  length / tone. Make and name your own patterns; everything is saved automatically.
+- **Sound**: a stereo synth engine (ladder-filter basses, supersaw chords, real sidechain, reverb, delay,
+  chorus, glue compressor and limiter). Swap any drum for your own WAV samples.
+- **Mixer** with levels, pan, sends and tone for every sound; **song mode** to chain patterns.
+- **Second keyboard**: plug in any MIDI keyboard to play a lead synth (17 sounds) over the beat, and record
+  it into the pattern.
+- **Record and export**: record to WAV, export patterns as MIDI files, sync with other gear by MIDI clock.
+- **Windows app** with an on-screen Launchpad you can click, plus a console version for macOS and Linux.
+
+| | |
+|---|---|
+| ![Mixer](docs/screenshots/mixer.png) **Mixer**: every sound, sampled drums, master | ![Effects](docs/screenshots/effects.png) **Effects**: hold to play, with their settings |
+| ![Instrument](docs/screenshots/instrument.png) **Instrument**: the lead synth for a second keyboard | ![Song](docs/screenshots/song.png) **Song**: chain patterns |
+| ![Styles](docs/screenshots/styles.png) **Styles**: twelve genres | ![Style picker](docs/screenshots/picker.png) **Hold View**: pick styles and patterns on the Launchpad |
+| ![Devices](docs/screenshots/devices.png) **Devices**: Launchpad, keyboards, audio, MIDI clock | ![About](docs/screenshots/about.png) **About**: credits and licences |
+
+## Getting it
+
+**Windows**: build it with the steps under [Build](#build) (Visual Studio 2019/2022 and CMake). The result
+is a single `LP-DNB.exe`; keep `THIRD-PARTY-NOTICES.txt` with it if you pass it on.
+
+**macOS / Linux**: the same steps build the console version.
+
+Then plug in the Launchpad Mini (close Ableton or Novation Components first) and press Play.
 
 There's also a second program, **lp-tenori**: a Tenori-on style sequencer that plays the same sound engine
 from the Launchpad (see [below](#lp-tenori-a-tenori-on-on-the-launchpad)).
@@ -136,7 +167,7 @@ Plug in any other MIDI keyboard and it plays the **lead synth** over the beat. I
 
 ## Where the patterns come from
 
-The built-in patterns are written for this app's 16-step grid. The second set of four per style follows well-known
+The built-in patterns are written for this app's step grid. The second set of four per style follows well-known
 grooves and common genre templates: classic breaks (Amen, Think, Funky Drummer, Impeach the President), the dembow
 3-3-2 spacing, Chicago/tech/garage house, 2-step and 4x4 garage, grime/drill hi-hat cadences, amapiano log-drum
 placement, and so on. Breakdowns used as references:
@@ -238,6 +269,7 @@ mutes and save file.
 - **Effects** tab: the style's 16 effects. Hold a button to play one; hover for a description. Below:
   delay time and echoes, reverb size, chorus.
 - **Song** tab: chain patterns into a song.
+- **About** tab: version, credits and the licences of everything LP-DNB is built on.
 - **Instrument** tab: the lead synth for a second MIDI keyboard (see above), with a playable keyboard.
 - **Styles** tab: all 12 styles with tempo, key and a description. Click to switch.
 - **Devices** tab: Launchpad status and port choice (auto-detect by default), other MIDI inputs with an
@@ -366,8 +398,36 @@ pat("Two-step", {"x.........x.....",   // drums: x hit  X accent  o ghost  r 2-h
   WAV recording, MIDI export, autosave
 - `src/storage.cpp` – the save file
 - `assets/fonts/` – Nunito (SIL Open Font License), built into the program via `tools/embed_fonts.py`
+- `assets/icon/`, `src/lp-dnb.rc` – the program icon (drawn by `tools/make_icon.py`) and Windows version details
+- `THIRD-PARTY-NOTICES.txt` – licences of everything bundled; `tools/embed_notices.py` builds them into the program
 - `src/gui.cpp`, `src/main_win32.cpp` – the Windows window (Dear ImGui + Direct3D 11)
 - `src/main_console.cpp` – console front-end for macOS / Linux, plus the offline demo/test renderer
 - `src/tenori.cpp` – lp-tenori's sequencer: layers, modes, scheduling, Launchpad mapping, lights, save file
 - `src/main_tenori.cpp` – lp-tenori's console front-end and offline demo
 - `tests/selftest.cpp` – offline engine and file-format checks
+
+## Credits and licences
+
+LP-DNB is made by [shrieeiee](https://github.com/shrieeiee), written with Claude (Anthropic).
+
+It's built on these, each under its own licence (full texts in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt),
+in each library's folder under `third_party/`, and in the app's **About** tab):
+
+| Component | By | Licence | Used for |
+|---|---|---|---|
+| [Dear ImGui](https://github.com/ocornut/imgui) 1.91.9b | Omar Cornut and contributors | MIT | The window and controls |
+| [stb_truetype, stb_textedit, stb_rect_pack](https://github.com/nothings/stb) (inside Dear ImGui) | Sean Barrett | MIT or public domain | Font rendering, text boxes |
+| [RtMidi](https://github.com/thestk/rtmidi) 6.0.0 | Gary P. Scavone | MIT | MIDI in and out |
+| [miniaudio](https://miniaud.io) 0.11.22 | David Reid | MIT No Attribution or public domain | Audio output |
+| [Nunito](https://github.com/googlefonts/nunito) | Vernon Adams, Jacques Le Bailly, Manvel Shmavonyan, Alexei Vanyashin | SIL Open Font License 1.1 | The interface font (subset, built in) |
+
+The libraries are included unmodified apart from build settings. The font is a subset of Nunito (only the
+characters the app uses); it keeps its name, as the font has no Reserved Font Name, and its licence is in
+`assets/fonts/OFL.txt`. The icon was drawn for this project (`tools/make_icon.py`).
+
+The built-in patterns are original arrangements on the step grid that follow common genre templates; the
+articles they were checked against are credited under [Where the patterns come from](#where-the-patterns-come-from).
+No audio samples are included.
+
+LP-DNB is an independent project, not made by or affiliated with Novation / Focusrite. Launchpad is a
+trademark of Focusrite Audio Engineering Ltd.

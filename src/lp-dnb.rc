@@ -1,0 +1,31 @@
+// Windows resources: the program icon and the version details shown in
+// File Explorer (right-click > Properties > Details).
+#include <winver.h>
+
+1 ICON "../assets/icon/lp-dnb.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,2,0,0
+ PRODUCTVERSION 1,2,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080904b0"
+    BEGIN
+      VALUE "CompanyName", "shrieeiee"
+      VALUE "FileDescription", "LP-DNB groovebox for Novation Launchpad Mini"
+      VALUE "FileVersion", "1.2.0"
+      VALUE "InternalName", "LP-DNB"
+      VALUE "LegalCopyright", "LP-DNB by shrieeiee. Uses Dear ImGui (MIT), RtMidi (MIT), miniaudio (MIT-0 / public domain), Nunito font (SIL OFL 1.1)."
+      VALUE "OriginalFilename", "LP-DNB.exe"
+      VALUE "ProductName", "LP-DNB"
+      VALUE "ProductVersion", "1.2.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0809, 1200
+  END
+END

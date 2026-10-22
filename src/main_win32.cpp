@@ -184,7 +184,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
 
     WNDCLASSEXW wc{sizeof(wc), CS_CLASSDC, wndProc, 0, 0, hInst, nullptr, LoadCursor(nullptr, IDC_ARROW),
                    nullptr, nullptr, L"LP-DNB", nullptr};
-    wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    wc.hIcon = static_cast<HICON>(LoadImageW(hInst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+                                             GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+    wc.hIconSm = static_cast<HICON>(LoadImageW(hInst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                               GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    if (!wc.hIcon) wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
     RegisterClassExW(&wc);
 
     RECT work{};

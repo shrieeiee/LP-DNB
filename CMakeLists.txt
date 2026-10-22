@@ -26,12 +26,15 @@ set(CORE_SOURCES
   ${rtmidi_SOURCE_DIR}/RtMidi.cpp)
 
 if(WIN32)
+  enable_language(RC)  # for src/lp-dnb.rc (icon and version details)
   # Windows: the GUI app (Dear ImGui on Direct3D 11).
   add_executable(lp-dnb WIN32
     ${CORE_SOURCES}
     src/gui.cpp
     src/fonts_data.cpp
+    src/notices_data.cpp
     src/main_win32.cpp
+    src/lp-dnb.rc
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
@@ -98,6 +101,10 @@ set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT l
 add_executable(lp-dnb-tests tests/selftest.cpp src/styles.cpp src/storage.cpp src/sample.cpp src/engine.cpp
   src/tenori.cpp src/controller.cpp)
 target_include_directories(lp-dnb-tests PRIVATE src)
+# Keep the licences of the bundled libraries and font next to the program.
+add_custom_command(TARGET lp-dnb POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/THIRD-PARTY-NOTICES.txt $<TARGET_FILE_DIR:lp-dnb>)
+
 if(WIN32)
   target_compile_definitions(lp-dnb-tests PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 endif()
