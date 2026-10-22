@@ -3,12 +3,36 @@
 A multi-style groovebox for the original Novation **Launchpad Mini** (micro-USB, mk1/mk2), written in C++17.
 It started as drum & bass and now has **12 styles and 96 built-in patterns**. Each style has its own drum kit,
 bass synth, chord sound, key, swing and effects, and the Launchpad remaps itself for each one.
-Everything is synthesised live (no samples), and every effect has its own light pattern on the pads.
+Everything is synthesised live by default, and any drum can be swapped for a WAV sample of your own.
+Every effect has its own light pattern on the pads.
 
 ![LP-DNB on Windows](docs/screenshot.png)
 
-You can make your own named patterns under any style, and they're saved between sessions. A second
-MIDI keyboard can play a lead synth over the top, with a choice of 17 sounds.
+You can make your own named patterns (up to 4 bars) under any style, chain them into a song, and they're
+saved between sessions. A second MIDI keyboard can play a lead synth over the top, with a choice of 17
+sounds, and you can record what you play into the pattern. Record the output to WAV, export patterns as
+MIDI files, and sync to other gear with MIDI clock.
+
+## The sound engine
+
+- **Stereo throughout**, with hats, percussion and toms placed across the field, wide unison chords and
+  a stereo chorus.
+- **Drums**: kicks with a beater click layer, snares with a rattling wire layer, wide claps, band-limited
+  (alias-free) hats and cowbells. Each drum can have its own **tune, length and tone**, and any drum can be a
+  **WAV sample** instead (single files, or a whole kit folder matched by file name).
+- **Bass**: a 24 dB **ladder filter** (303 / Moog style) on the acid, Reese and wobble basses, an
+  anti-aliased drive stage, filter updated every sample for smooth sweeps.
+- **Chords and leads**: up to **7-voice supersaw** unison per note, spread across the stereo field.
+- **Sidechain**: the kick really ducks the bass and chords (an envelope follower on the kick, with a
+  release set per style), and you can set how much.
+- **Effects**: a smooth 8-line reverb with adjustable size, a tempo-synced ping-pong delay (1/4, dotted 1/8,
+  1/8, 1/8 triplet, 1/16) with adjustable echoes, chorus, plus per-sound reverb and delay sends.
+- **Master**: gentle EQ, "glue" bus compression, stereo width, and a look-ahead limiter so it never clips.
+- **Feel**: humanise (tiny timing and loudness variations), hat-only swing, automatic drum fills every 4, 8
+  or 16 bars.
+- **Per-step locks**: any step can have its own pitch, length and tone / filter (right-click a step).
+- **Timing**: pads, keys and MIDI land with sample accuracy (constant latency, no block jitter); the audio
+  buffer size is adjustable, and Windows can use WASAPI exclusive mode for the lowest latency.
 
 On Windows it opens a window with an on-screen Launchpad that mirrors the real one's lights (and can
 be clicked), a step sequencer, the effects, the lead instrument, a style browser and a devices panel. Devices are detected
@@ -32,6 +56,9 @@ Other MIDI keyboards and pad controllers are picked up automatically too.
 | Lo-fi | 78 | D dorian | Soft kit, lazy swing, warm sub, jazzy electric piano | Chill, Study, Rainy, Jazz hop, Dilla swing, Bossa, Brushes, Dusty boom bap |
 | Afro House | 122 | G dorian | Congas, shaker, clave, cowbell, marimba | Afro house, Afrobeats, Tribal, Log drum, Amapiano, Afrobeat, Gqom, Afro tech |
 
+Every built-in pattern is two bars long: the second bar adds the little end-of-phrase moves (ghost-note
+pickups, an open hat into the next bar, the bass jumping an octave), and hat lines get strong/weak dynamics.
+
 Chords are built from each style's scale, so they always fit the key (minor 7ths, major 9ths and so on
 come out naturally). Switching style or pattern happens at the end of the bar, and switching style also
 sets that style's tempo.
@@ -53,6 +80,40 @@ Every style holds up to 24 patterns: its 8 built-in ones plus 16 of your own.
   - Linux: `~/.config/lp-dnb/lp-dnb-data.txt`
 
   Patterns in it use the same text format as `src/styles.cpp`, so you can copy them between the two.
+
+## Longer patterns and songs
+
+- **Length**: 1 to 4 bars (Sequencer tab). Making a pattern longer repeats what's there, ready to vary.
+  **Showing** picks which bar you're editing (or **Follow** the playhead). On the Launchpad's EDIT view, BPM-/BPM+
+  page through the bars of a long pattern.
+- **Song** tab: a list of this style's patterns, each played 1-16 times, in order, then looping. Tick
+  **Song mode** and press Play.
+
+## Mixer and samples
+
+The **Mixer** tab has a row for every sound in the style (each style keeps its own settings): level, pan,
+reverb and delay sends, tune, length, tone and solo. Right-click any slider to reset it. Below it: stereo width,
+glue compression, kick ducking, a stereo meter, how hard the limiter is working, and CPU use.
+
+**Source** on each drum row switches it between the synth and a WAV file (8/16/24/32-bit or float, mono or
+stereo, any sample rate). **Load kit folder...** picks a folder and matches its files to the style's drums by
+name (kick/bd, snare/sd, clap, hat/hh, open/oh, ride, crash, rim, tom, conga, shaker, cowbell...). You can also
+drag WAV files or a folder onto the window: onto a row in the Mixer to replace that sound.
+Samples are remembered between sessions.
+
+## Recording and exporting
+
+- **Record** (the round button next to Play) writes what you hear to a 24-bit WAV.
+- **Export MIDI** (Sequencer tab) saves the pattern as a .mid file with drums (General MIDI notes), bass,
+  chords and lead on separate tracks, with the tempo and swing.
+- **Rec lead** (Sequencer tab) records the lead keyboard into the pattern's Lead row, snapped to the nearest step.
+
+Files go in `Music\LP-DNB` (Windows) or `~/Music/LP-DNB`.
+
+## MIDI clock
+
+In **Devices**: **Send clock to** another MIDI device (24 ticks per beat plus Start/Stop, locked to the audio
+engine), or **Follow clock from** one of your MIDI inputs: LP-DNB takes its tempo, Start and Stop.
 
 ## Playing over the top (second MIDI instrument)
 
@@ -121,7 +182,11 @@ program can open a MIDI port at a time; LP-DNB keeps trying and connects as soon
 
 Console options: `--list` (show MIDI ports), `--style N` (start in style N), `--audio "device name"`,
 `--demo out.wav` (render two patterns from every style), `--test [out.wav]` (render all 96 built-in patterns
-and print their levels; no hardware needed for either).
+and print their levels, limiter activity and CPU use; no hardware needed for either).
+
+`lp-dnb-tests` (built alongside) checks the engine offline: WAV loading in every format, kit-folder matching,
+sample-accurate timing, sampled drums, the limiter ceiling, stereo output, long patterns and song mode, and that
+the save file round-trips exactly.
 
 ## Launchpad layout
 
@@ -148,26 +213,31 @@ and print their levels; no hardware needed for either).
   right the style's chord sound, played on the last note pad you pressed. Hold it to sustain pads.
 - **Note row**: one octave of the style's scale on its bass synth.
 - **Right column**: PERFORM = mute/unmute each track; EDIT = pick the track to edit.
-- **EDIT view**: top two rows are the 16 steps. Tap to toggle. For bass and chords, hold a step and
+- **EDIT view**: top two rows are the 16 steps of one bar (BPM-/BPM+ change bar on longer patterns). Tap to toggle. For bass and chords, hold a step and
   press a note pad to set its note.
 - **Hold View + Pat N**: copy the current pattern into slot N. **Hold View + right column** (EDIT): clear that track.
 
 ## The window (Windows)
 
-- **Top bar**: Play/Stop, style, pattern list (with **+** for a new one), tempo, volume, level meter.
+- **Top bar**: Play/Stop, Record, style, pattern list (with **+** for a new one), tempo, volume, stereo level meter.
 - **Launchpad** (left): a live copy of the lights, labelled for the current style. Click and hold pads
   exactly like the hardware.
 - **Sequencer** tab: click a step to toggle it. Right-click for more: accents, ghost notes, 2- and
   3-hit rolls on drums; notes, accents, slides and holds on the bass; chords (shown as i, IV, VII7...)
   and holds on the chord track. M mutes a track; clicking a track name selects it for the Launchpad's
-  EDIT view. Above the grid, every pattern of the style; below it, Duplicate, Rename, Delete, Reset, Clear.
-- **Effects** tab: the style's 16 effects. Hold a button to play one; hover for a description.
+  EDIT view. Above the grid, every pattern of the style and the length / bar selector; below it, Duplicate,
+  Rename, Delete, Reset, Clear, Rec lead, Export MIDI, and the Feel settings (humanise, hat swing, fills).
+  A small notch on a step means it has its own pitch / length / tone.
+- **Mixer** tab: levels, sends and sound controls for every sound, sampled drums, master settings.
+- **Effects** tab: the style's 16 effects. Hold a button to play one; hover for a description. Below:
+  delay time and echoes, reverb size, chorus.
+- **Song** tab: chain patterns into a song.
 - **Instrument** tab: the lead synth for a second MIDI keyboard (see above), with a playable keyboard.
 - **Styles** tab: all 12 styles with tempo, key and a description. Click to switch.
 - **Devices** tab: Launchpad status and port choice (auto-detect by default), other MIDI inputs with an
   on/off tick each and an activity light, and the audio output. Everything is rescanned every second.
   If your chosen audio device is unplugged, sound moves to the system default and switches back
-  when it returns.
+  when it returns. Also: audio buffer size and exclusive mode, MIDI clock in/out, and the recordings folder.
 - **Computer keyboard**: Space = play/stop, Z X C V B N M , = drum row, 1–8 = notes,
   Q–I and A–K = hold effects (same order as the pads).
 
@@ -188,7 +258,7 @@ Each style puts 16 of these on its two effect rows.
 | Tape stop | Audio winds down to a halt | Red stripes that slow down and fade with the tape |
 | Half-time | Sequencer runs at half speed | Slow orange breathing glow |
 | Reverse | Last beat played backwards | Green scanner running right to left |
-| Delay throw | Dotted-⅛ ping-pong echoes | Rings bouncing left/right, fading with each echo |
+| Delay throw | Tempo-synced ping-pong echoes (time set in the Effects tab) | Rings bouncing left/right, fading with each echo |
 | Low-pass / High-pass | Resonant filter sweep on the master | A red ceiling closing down / amber floor rising up |
 | Bitcrush | Sample-rate + bit reduction | Chunky random 2×2 blocks every 16th |
 | Flanger | Jet sweep | Diagonal red/green waves |
@@ -221,11 +291,17 @@ pat("Two-step", {"x.........x.....",   // drums: x hit  X accent  o ghost  r 2-h
 ## Code map
 
 - `src/styles.cpp` – every style: sounds, key, swing, effect layout and patterns
-- `src/engine.cpp` – drum/bass/chord/lead voices, sequencer (swing, rolls, slides), master FX chain (audio thread)
+- `src/engine.cpp` – drum/bass/chord/lead voices, sampled drums, sequencer (swing, rolls, slides, locks, fills,
+  song mode, lead recording), effects and master chain (audio thread)
+- `src/dsp.h` – filters (SVF, ladder), band-limited oscillators, anti-aliased drive, reverb, chorus, compressor, limiter
+- `src/sample.cpp` – WAV loading and kit-folder matching
+- `src/clock.cpp` – MIDI clock output
 - `src/controller.cpp` – button mapping (remapped per style) and all the light patterns (main thread)
 - `src/launchpad.cpp` – MIDI hub: hot-plug scanning, Launchpad protocol (double-buffered LED updates), other inputs
-- `src/app.cpp` – glues it together: audio device and hot-plug, pattern bank, lead synth input, autosave
+- `src/app.cpp` – glues it together: audio device and hot-plug, pattern bank, lead synth input, samples,
+  WAV recording, MIDI export, autosave
 - `src/storage.cpp` – the save file
 - `assets/fonts/` – Nunito (SIL Open Font License), built into the program via `tools/embed_fonts.py`
 - `src/gui.cpp`, `src/main_win32.cpp` – the Windows window (Dear ImGui + Direct3D 11)
 - `src/main_console.cpp` – console front-end for macOS / Linux, plus the offline demo/test renderer
+- `tests/selftest.cpp` – offline engine and file-format checks

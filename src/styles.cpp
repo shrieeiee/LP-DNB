@@ -56,7 +56,7 @@ DrumDef cowbell(float g = 0.5f) { return mk("Cowbell", "Cow\nbell", DrumType::Co
 PatternDef pat(const char* name, std::array<const char*, kTracks> rows) {
     PatternDef p;
     p.name = name;
-    for (size_t i = 0; i < rows.size(); ++i) p.rows[i] = rows[i];
+    for (size_t i = 0; i < rows.size(); ++i) p.rows[i] = rows[i] ? rows[i] : "";
     return p;
 }
 
@@ -66,12 +66,15 @@ const std::array<int, 7> PHRYGIAN{0, 1, 3, 5, 7, 8, 10};
 
 // ---------------------------------------------------------------- styles --
 
+void enrich(const Style& s, PatternDef& p);
+
 std::vector<Style> build() {
     std::vector<Style> v;
 
     {   // ------------------------------------------------ Drum & Bass
         Style s;
         s.name = "Drum & Bass";
+        s.duckRelease = 0.18f;
         s.padLabel = "DnB";
         s.trim = 0.93f;
         s.blurb = "174 BPM rollers: Reese bass, two-step breaks, rave stabs";
@@ -81,9 +84,11 @@ std::vector<Style> build() {
                    snare("Ghost snare", "Ghost", 200, 50, 30, 1600, 0.4f, 9000, 0.32f, 0.f),
                    closedHat(), openHat(), ride(), crash()};
         s.bass.name = "Reese bass";
+        s.bass.filter = 1; s.bass.width = 0.6f;
         s.bass.saw = 1; s.bass.sub = 0.6f; s.bass.detune = 0.48f; s.bass.cutoff = 260; s.bass.envAmt = 2400;
         s.bass.envDecay = 4; s.bass.res = 1.6f; s.bass.release = 9; s.bass.drive = 2.2f;
-        s.chord.name = "Rave stab"; s.chord.osc = ChordOsc::Saw; s.chord.notes = 5; s.chord.decay = 3.5f;
+        s.chord.name = "Rave stab";
+        s.chord.unison = 3; s.chord.spread = 0.7f; s.chord.chorus = 0.2f; s.chord.osc = ChordOsc::Saw; s.chord.notes = 5; s.chord.decay = 3.5f;
         s.chord.cutoff = 400; s.chord.envAmt = 3200; s.chord.envDecay = 9; s.chord.res = 1.1f; s.chord.verb = 0.35f;
         s.chord.delay = 0.12f;
         s.fx = {FX_STUT4, FX_STUT8, FX_STUT16, FX_STUT32, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY,
@@ -105,6 +110,7 @@ std::vector<Style> build() {
     {   // ------------------------------------------------ House
         Style s;
         s.name = "House";
+        s.duckRelease = 0.14f;
         s.padLabel = "House";
         s.trim = 0.9f;
         s.blurb = "124 BPM: 909 kit, offbeat hats, deep sub and organ chords";
@@ -120,7 +126,8 @@ std::vector<Style> build() {
         s.bass.saw = 0.15f; s.bass.sine = 1.f; s.bass.sub = 0.f; s.bass.oscOctave = 0; s.bass.cutoff = 500;
         s.bass.envAmt = 700; s.bass.envDecay = 6; s.bass.decay = 2.5f; s.bass.release = 12; s.bass.drive = 1.6f;
         s.bass.gain = 1.2f;
-        s.chord.name = "Organ stab"; s.chord.osc = ChordOsc::Organ; s.chord.notes = 4; s.chord.decay = 6.f;
+        s.chord.name = "Organ stab";
+        s.chord.chorus = 0.5f; s.chord.spread = 0.4f; s.chord.osc = ChordOsc::Organ; s.chord.notes = 4; s.chord.decay = 6.f;
         s.chord.release = 10; s.chord.cutoff = 4000; s.chord.gain = 0.7f; s.chord.verb = 0.2f; s.chord.delay = 0.1f;
         s.fx = {FX_STUT4, FX_STUT8, FX_STUT16, FX_GATE, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY,
                 FX_LPF, FX_HPF, FX_PUMP, FX_FLANGE, FX_REVERB, FX_LOFI, FX_RISER, FX_CRUSH};
@@ -141,6 +148,7 @@ std::vector<Style> build() {
     {   // ------------------------------------------------ Techno
         Style s;
         s.name = "Techno";
+        s.duckRelease = 0.12f;
         s.padLabel = "Techno";
         s.trim = 0.74f;
         s.blurb = "132 BPM: rumbling kick, acid 303 line, dub chords";
@@ -153,10 +161,12 @@ std::vector<Style> build() {
                    tom("Perc", "Perc", 260, 0.6f, 12, 0.15f, 0.6f, 0.25f),
                    crash()};
         s.bass.name = "Acid 303";
+        s.bass.filter = 1; s.bass.width = 0.f;
         s.bass.saw = 1; s.bass.sub = 0.f; s.bass.cutoff = 180; s.bass.envAmt = 2600; s.bass.envDecay = 7;
         s.bass.res = 7.f; s.bass.release = 30; s.bass.glide = 0.06f; s.bass.drive = 1.8f; s.bass.accent = 1.9f;
         s.bass.gain = 0.8f;
-        s.chord.name = "Dub chord"; s.chord.osc = ChordOsc::Saw; s.chord.notes = 3; s.chord.decay = 7;
+        s.chord.name = "Dub chord";
+        s.chord.unison = 2; s.chord.spread = 0.8f; s.chord.chorus = 0.3f; s.chord.osc = ChordOsc::Saw; s.chord.notes = 3; s.chord.decay = 7;
         s.chord.cutoff = 600; s.chord.envAmt = 1500; s.chord.envDecay = 10; s.chord.res = 1.5f;
         s.chord.verb = 0.45f; s.chord.delay = 0.5f;
         s.fx = {FX_STUT4, FX_STUT8, FX_STUT16, FX_STUT32, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY,
@@ -191,7 +201,8 @@ std::vector<Style> build() {
         s.bass.name = "Round bass";
         s.bass.saw = 0.2f; s.bass.sine = 0.9f; s.bass.sub = 0.5f; s.bass.cutoff = 500; s.bass.envAmt = 500;
         s.bass.decay = 2.5f; s.bass.release = 10; s.bass.drive = 1.5f; s.bass.gain = 1.1f;
-        s.chord.name = "Rhodes"; s.chord.osc = ChordOsc::EPiano; s.chord.notes = 4; s.chord.decay = 1.2f;
+        s.chord.name = "Rhodes";
+        s.chord.chorus = 0.6f; s.chord.spread = 0.5f; s.chord.osc = ChordOsc::EPiano; s.chord.notes = 4; s.chord.decay = 1.2f;
         s.chord.release = 4; s.chord.gain = 0.8f; s.chord.verb = 0.25f; s.chord.delay = 0.05f;
         s.fx = {FX_STUT4, FX_STUT8, FX_STUT16, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY, FX_LOFI,
                 FX_LPF, FX_HPF, FX_CRUSH, FX_FLANGE, FX_REVERB, FX_SIREN, FX_RISER, FX_HORN};
@@ -226,7 +237,8 @@ std::vector<Style> build() {
         s.bass.saw = 0; s.bass.sine = 1; s.bass.sub = 0; s.bass.oscOctave = 0; s.bass.cutoff = 8000; s.bass.envAmt = 0;
         s.bass.decay = 0.9f; s.bass.release = 4; s.bass.glide = 0.09f; s.bass.drop = 7; s.bass.dropRate = 28;
         s.bass.drive = 2.8f; s.bass.gain = 1.1f;
-        s.chord.name = "Bells"; s.chord.osc = ChordOsc::Bell; s.chord.notes = 3; s.chord.octave = 36;
+        s.chord.name = "Bells";
+        s.chord.spread = 0.7f; s.chord.chorus = 0.2f; s.chord.osc = ChordOsc::Bell; s.chord.notes = 3; s.chord.octave = 36;
         s.chord.decay = 2.5f; s.chord.release = 3; s.chord.gain = 0.55f; s.chord.verb = 0.35f; s.chord.delay = 0.25f;
         s.fx = {FX_STUT8, FX_STUT16, FX_STUT32, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY, FX_GATE,
                 FX_LPF, FX_HPF, FX_CRUSH, FX_FLANGE, FX_REVERB, FX_LASER, FX_RISER, FX_HORN};
@@ -247,6 +259,7 @@ std::vector<Style> build() {
     {   // ------------------------------------------------ Dubstep
         Style s;
         s.name = "Dubstep";
+        s.duckRelease = 0.2f;
         s.padLabel = "Dub-\nstep";
         s.trim = 0.77f;
         s.blurb = "140 BPM half-time: wobble bass, huge snare, dark pads";
@@ -259,10 +272,12 @@ std::vector<Style> build() {
                    tom("Tom", "Tom", 150, 0.9f, 8, 0.15f, 0.7f, 0.2f),
                    crash()};
         s.bass.name = "Wobble";
+        s.bass.filter = 1; s.bass.width = 0.5f;
         s.bass.saw = 0.8f; s.bass.square = 0.6f; s.bass.sub = 0.7f; s.bass.detune = 0.3f; s.bass.cutoff = 160;
         s.bass.envAmt = 0; s.bass.lfoDepth = 2200; s.bass.lfoRate = 2.f; s.bass.res = 3.f; s.bass.drive = 3.f;
         s.bass.release = 10;
-        s.chord.name = "Dark pad"; s.chord.osc = ChordOsc::Saw; s.chord.notes = 3; s.chord.attack = 0.25f;
+        s.chord.name = "Dark pad";
+        s.chord.unison = 5; s.chord.spread = 1.f; s.chord.chorus = 0.5f; s.chord.osc = ChordOsc::Saw; s.chord.notes = 3; s.chord.attack = 0.25f;
         s.chord.decay = 0; s.chord.sustain = 1; s.chord.release = 1.5f; s.chord.cutoff = 900; s.chord.detune = 0.6f;
         s.chord.gain = 0.55f; s.chord.verb = 0.5f; s.chord.delay = 0.1f;
         s.fx = {FX_STUT4, FX_STUT8, FX_STUT16, FX_STUT32, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY,
@@ -284,6 +299,7 @@ std::vector<Style> build() {
     {   // ------------------------------------------------ UK Garage
         Style s;
         s.name = "UK Garage";
+        s.duckRelease = 0.14f;
         s.padLabel = "UK\nGarage";
         s.trim = 1.07f;
         s.blurb = "132 BPM: shuffled 2-step, bumpy organ bass, M1 stabs";
@@ -298,7 +314,8 @@ std::vector<Style> build() {
         s.bass.name = "Organ bass";
         s.bass.saw = 0; s.bass.square = 0.8f; s.bass.sine = 0.5f; s.bass.sub = 0.3f; s.bass.cutoff = 900;
         s.bass.envAmt = 800; s.bass.envDecay = 8; s.bass.decay = 4; s.bass.release = 14; s.bass.drive = 1.8f;
-        s.chord.name = "M1 organ"; s.chord.osc = ChordOsc::Organ; s.chord.notes = 4; s.chord.decay = 9;
+        s.chord.name = "M1 organ";
+        s.chord.chorus = 0.4f; s.chord.spread = 0.4f; s.chord.osc = ChordOsc::Organ; s.chord.notes = 4; s.chord.decay = 9;
         s.chord.release = 12; s.chord.gain = 0.7f; s.chord.verb = 0.2f; s.chord.delay = 0.12f;
         s.fx = {FX_STUT4, FX_STUT8, FX_STUT16, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY, FX_PUMP,
                 FX_LPF, FX_HPF, FX_CRUSH, FX_FLANGE, FX_REVERB, FX_SIREN, FX_RISER, FX_HORN};
@@ -333,7 +350,8 @@ std::vector<Style> build() {
         s.bass.name = "Sub bass";
         s.bass.saw = 0.1f; s.bass.sine = 1; s.bass.sub = 0; s.bass.oscOctave = 0; s.bass.cutoff = 600; s.bass.envAmt = 400;
         s.bass.decay = 2.f; s.bass.release = 10; s.bass.drive = 1.8f; s.bass.gain = 1.2f;
-        s.chord.name = "Pluck"; s.chord.osc = ChordOsc::Saw; s.chord.notes = 3; s.chord.decay = 6;
+        s.chord.name = "Pluck";
+        s.chord.unison = 3; s.chord.spread = 0.7f; s.chord.chorus = 0.2f; s.chord.osc = ChordOsc::Saw; s.chord.notes = 3; s.chord.decay = 6;
         s.chord.cutoff = 500; s.chord.envAmt = 3500; s.chord.envDecay = 14; s.chord.res = 1.3f;
         s.chord.gain = 0.7f; s.chord.verb = 0.25f; s.chord.delay = 0.15f;
         s.fx = {FX_STUT8, FX_STUT16, FX_STUT32, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY, FX_GATE,
@@ -367,9 +385,11 @@ std::vector<Style> build() {
                    cowbell(),
                    clap("Clap", "Clap", 1200, 18, 9, 1.4f, 0.8f, 0.15f)};
         s.bass.name = "Slap bass";
+        s.bass.width = 0.2f;
         s.bass.saw = 0.9f; s.bass.square = 0.3f; s.bass.sub = 0.3f; s.bass.cutoff = 400; s.bass.envAmt = 3500;
         s.bass.envDecay = 12; s.bass.res = 2.5f; s.bass.decay = 3.5f; s.bass.release = 14; s.bass.drive = 1.8f;
-        s.chord.name = "Strings"; s.chord.osc = ChordOsc::Saw; s.chord.notes = 4; s.chord.attack = 0.12f;
+        s.chord.name = "Strings";
+        s.chord.unison = 4; s.chord.spread = 1.f; s.chord.chorus = 0.6f; s.chord.osc = ChordOsc::Saw; s.chord.notes = 4; s.chord.attack = 0.12f;
         s.chord.decay = 0.5f; s.chord.sustain = 0.8f; s.chord.release = 2.5f; s.chord.cutoff = 2500;
         s.chord.detune = 0.5f; s.chord.gain = 0.5f; s.chord.verb = 0.45f; s.chord.delay = 0.05f;
         s.fx = {FX_STUT8, FX_STUT16, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY, FX_GATE, FX_PUMP,
@@ -391,6 +411,7 @@ std::vector<Style> build() {
     {   // ------------------------------------------------ Synthwave
         Style s;
         s.name = "Synthwave";
+        s.duckRelease = 0.2f;
         s.padLabel = "Synth\nwave";
         s.blurb = "100 BPM: gated snare, pulsing arp bass, wide pads";
         s.bpm = 100; s.swing = 0.5f; s.root = 33; s.scale = MINOR; s.keyName = "A minor"; s.duck = 0.4f;
@@ -402,9 +423,11 @@ std::vector<Style> build() {
                    clap("Clap", "Clap", 1200, 16, 9, 1.4f, 0.6f, 0.4f),
                    crash()};
         s.bass.name = "Arp bass";
+        s.bass.filter = 1; s.bass.width = 0.4f;
         s.bass.saw = 1; s.bass.detune = 0.3f; s.bass.sub = 0.5f; s.bass.cutoff = 300; s.bass.envAmt = 3000;
         s.bass.envDecay = 9; s.bass.res = 2; s.bass.decay = 5; s.bass.release = 14; s.bass.drive = 1.6f;
-        s.chord.name = "Pad"; s.chord.osc = ChordOsc::Saw; s.chord.notes = 3; s.chord.attack = 0.4f;
+        s.chord.name = "Pad";
+        s.chord.unison = 5; s.chord.spread = 1.f; s.chord.chorus = 0.6f; s.chord.osc = ChordOsc::Saw; s.chord.notes = 3; s.chord.attack = 0.4f;
         s.chord.decay = 0; s.chord.sustain = 1; s.chord.release = 2.5f; s.chord.cutoff = 1600; s.chord.detune = 0.7f;
         s.chord.gain = 0.55f; s.chord.verb = 0.6f; s.chord.delay = 0.2f;
         s.fx = {FX_STUT8, FX_STUT16, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY, FX_GATE, FX_PUMP,
@@ -440,7 +463,8 @@ std::vector<Style> build() {
         s.bass.name = "Warm sub";
         s.bass.saw = 0.1f; s.bass.sine = 1; s.bass.sub = 0.4f; s.bass.cutoff = 600; s.bass.envAmt = 300;
         s.bass.decay = 1.5f; s.bass.release = 8; s.bass.drive = 1.3f; s.bass.gain = 1.1f;
-        s.chord.name = "Electric piano"; s.chord.osc = ChordOsc::EPiano; s.chord.notes = 5; s.chord.decay = 1.0f;
+        s.chord.name = "Electric piano";
+        s.chord.chorus = 0.7f; s.chord.spread = 0.5f; s.chord.osc = ChordOsc::EPiano; s.chord.notes = 5; s.chord.decay = 1.0f;
         s.chord.release = 3; s.chord.gain = 0.7f; s.chord.verb = 0.3f; s.chord.delay = 0.08f;
         s.fx = {FX_LOFI, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY, FX_REVERB, FX_STUT4, FX_STUT8,
                 FX_LPF, FX_HPF, FX_CRUSH, FX_FLANGE, FX_GATE, FX_PUMP, FX_RISER, FX_STUT16};
@@ -476,7 +500,8 @@ std::vector<Style> build() {
         s.bass.name = "Round sub";
         s.bass.saw = 0; s.bass.square = 0.2f; s.bass.sine = 0.9f; s.bass.sub = 0.4f; s.bass.cutoff = 700;
         s.bass.envAmt = 500; s.bass.decay = 3.5f; s.bass.release = 12; s.bass.drive = 1.6f; s.bass.gain = 1.1f;
-        s.chord.name = "Marimba"; s.chord.osc = ChordOsc::Marimba; s.chord.notes = 3; s.chord.octave = 36;
+        s.chord.name = "Marimba";
+        s.chord.spread = 0.6f; s.chord.osc = ChordOsc::Marimba; s.chord.notes = 3; s.chord.octave = 36;
         s.chord.decay = 7; s.chord.release = 8; s.chord.gain = 0.7f; s.chord.verb = 0.2f; s.chord.delay = 0.15f;
         s.fx = {FX_STUT4, FX_STUT8, FX_STUT16, FX_TAPESTOP, FX_HALFTIME, FX_REVERSE, FX_DELAY, FX_GATE,
                 FX_LPF, FX_HPF, FX_PUMP, FX_FLANGE, FX_REVERB, FX_SIREN, FX_RISER, FX_HORN};
@@ -550,18 +575,91 @@ std::vector<Style> build() {
         int k = 4;
         for (const Extra& e : extras)
             if (s.name == e.style && k < kFactorySlots) s.patterns[static_cast<size_t>(k++)] = pat(e.name, e.rows);
-        for (; k < kFactorySlots; ++k) s.patterns[static_cast<size_t>(k)] = pat("Empty", {"", "", "", "", "", "", "", ""});
+        for (; k < kFactorySlots; ++k) s.patterns[static_cast<size_t>(k)] = pat("Empty", {"", "", "", "", "", "", "", "", ""});
     }
     // Sanity-check the pattern text so a typo can't break the sequencer.
     for (auto& s : v)
         for (auto& p : s.patterns)
-            for (size_t t = 0; t < p.rows.size(); ++t)
+            for (size_t t = 0; t < static_cast<size_t>(T_LEAD); ++t)
                 if (p.rows[t].size() != kSteps) {
                     logf("Pattern \"%s / %s\" row %zu has %zu steps (fixed to 16)", s.name.c_str(), p.name.c_str(), t,
                          p.rows[t].size());
                     p.rows[t].resize(kSteps, '.');
                 }
+    for (auto& s : v)
+        for (auto& p : s.patterns) enrich(s, p);
     return v;
+}
+
+// Gives a one-bar groove a second bar with the little end-of-phrase moves a
+// drummer / producer would make: ghost-note pickups, an open hat into the
+// next bar, hat dynamics and the bass jumping up an octave on its last note.
+void enrich(const Style& s, PatternDef& p) {
+    bool anyHit = false;
+    for (size_t t = 0; t < static_cast<size_t>(T_LEAD); ++t) {
+        if (p.rows[t].size() != static_cast<size_t>(kSteps)) return;  // hand-made longer pattern: leave it
+        if (p.rows[t].find_first_not_of('.') != std::string::npos) anyHit = true;
+    }
+    if (!anyHit) return;
+    auto hits = [](const std::string& r) { int n = 0; for (char c : r) n += c != '.' ? 1 : 0; return n; };
+    auto hasDynamics = [](const std::string& r) { return r.find_first_of("oXrt") != std::string::npos; };
+
+    std::array<std::string, kTracks> bar2;
+    for (size_t t = 0; t < static_cast<size_t>(T_LEAD); ++t) bar2[t] = p.rows[t];
+
+    int closed = -1, open = -1, snareT = -1;
+    for (int t = 0; t < kDrumTracks; ++t) {
+        const DrumDef& d = s.drums[static_cast<size_t>(t)];
+        const std::string& r = p.rows[static_cast<size_t>(t)];
+        if (d.type == DrumType::Metal && d.p[4] > 30.f && closed < 0) closed = t;
+        else if (d.type == DrumType::Metal && d.p[4] > 5.f && d.p[4] <= 30.f && open < 0) open = t;
+        else if ((d.type == DrumType::Snare || d.type == DrumType::Clap) && snareT < 0 &&
+                 (r[4] != '.' || r[8] != '.' || r[12] != '.'))
+            snareT = t;
+    }
+    // Hats: 16th-note hats with no dynamics get a strong/weak pattern.
+    if (closed >= 0) {
+        std::string& r = p.rows[static_cast<size_t>(closed)];
+        if (hits(r) >= 12 && !hasDynamics(r)) {
+            for (int i = 1; i < kSteps; i += 2) if (r[static_cast<size_t>(i)] == 'x') r[static_cast<size_t>(i)] = 'o';
+            bar2[static_cast<size_t>(closed)] = r;
+        }
+    }
+    // Snare: ghost-note pickup at the end of bar 2 (tightened with a decay lock).
+    if (snareT >= 0) {
+        std::string& r = bar2[static_cast<size_t>(snareT)];
+        if (r[15] == '.' && r[14] != 'x' && r[14] != 'X') {
+            r[15] = 'o';
+            p.locks += std::to_string(snareT) + ":31:0:-40:0 ";
+            if (r[13] == '.' && r[12] != '.') r[13] = 'o';
+        }
+    }
+    // Open hat into the next bar, cutting the closed hats under it.
+    if (open >= 0 && closed >= 0) {
+        std::string& o = bar2[static_cast<size_t>(open)];
+        std::string& c = bar2[static_cast<size_t>(closed)];
+        if (hits(o) <= 4 && o[14] == '.' && o[15] == '.' && c[14] != '.') {
+            o[14] = 'x';
+            c[14] = '.';
+            c[15] = '.';
+        }
+    }
+    // Bass: the last note of bar 2 jumps up an octave.
+    {
+        std::string& r = bar2[static_cast<size_t>(T_BASS)];
+        for (int i = kSteps - 1; i >= 8; --i) {
+            const char ch = r[static_cast<size_t>(i)];
+            if (ch == '.' || ch == '-') continue;
+            if (i + 1 < kSteps && r[static_cast<size_t>(i + 1)] == '-') break;  // a long held note: leave it
+            int deg = -1; char base = '0';
+            if (ch >= '0' && ch <= '9') { deg = ch - '0'; base = '0'; }
+            else if (ch >= 'A' && ch <= 'J') { deg = ch - 'A'; base = 'A'; }
+            else if (ch >= 'a' && ch <= 'j') { deg = ch - 'a'; base = 'a'; }
+            if (deg >= 0 && deg <= 2) r[static_cast<size_t>(i)] = static_cast<char>(base + deg + 7);
+            break;
+        }
+    }
+    for (size_t t = 0; t < static_cast<size_t>(T_LEAD); ++t) p.rows[t] += bar2[t];
 }
 
 }  // namespace
@@ -588,9 +686,37 @@ std::string chordNumeral(const Style& s, int degree, int notes) {
     return r;
 }
 
-void parseRow(const std::string& row, bool melodic, uint8_t codes[kSteps], int8_t notes[kSteps]) {
-    for (int s = 0; s < kSteps; ++s) {
-        const char c = s < static_cast<int>(row.size()) ? row[static_cast<size_t>(s)] : '.';
+// Drum, bass and chord rows are one character per step. The lead row is
+// space-separated tokens, because it stores real MIDI notes: "60 - - . 63 ...".
+int parseRow(const std::string& row, int track, uint8_t codes[kMaxSteps], int8_t notes[kMaxSteps]) {
+    for (int s = 0; s < kMaxSteps; ++s) { codes[s] = STEP_OFF; notes[s] = 0; }
+    if (track == T_LEAD) {
+        int s = 0;
+        size_t i = 0;
+        while (i < row.size() && s < kMaxSteps) {
+            while (i < row.size() && row[i] == ' ') ++i;
+            if (i >= row.size()) break;
+            size_t j = row.find(' ', i);
+            if (j == std::string::npos) j = row.size();
+            const std::string tok = row.substr(i, j - i);
+            if (tok == "-") codes[s] = STEP_TIE;
+            else if (tok != ".") {
+                try {
+                    int n = std::stoi(tok);
+                    codes[s] = STEP_ON;
+                    notes[s] = static_cast<int8_t>(std::max(0, std::min(127, n)));
+                } catch (...) {
+                }
+            }
+            ++s;
+            i = j;
+        }
+        return s;
+    }
+    const bool melodic = track >= T_BASS;
+    const int n = std::min(kMaxSteps, static_cast<int>(row.size()));
+    for (int s = 0; s < n; ++s) {
+        const char c = row[static_cast<size_t>(s)];
         uint8_t code = STEP_OFF;
         int8_t note = 0;
         if (melodic) {
@@ -611,12 +737,25 @@ void parseRow(const std::string& row, bool melodic, uint8_t codes[kSteps], int8_
         codes[s] = code;
         notes[s] = note;
     }
+    return n;
 }
 
 std::string encodeRow(const Shared& sh, int p, int t) {
-    std::string out(kSteps, '.');
+    const int len = sh.patternLength(p);
+    if (t == T_LEAD) {
+        std::string out;
+        for (int s = 0; s < len; ++s) {
+            const uint8_t v = sh.on[p][t][s].load();
+            if (s) out += ' ';
+            if (stepKind(v) == STEP_TIE) out += '-';
+            else if (stepSounds(v)) out += std::to_string(static_cast<int>(sh.note[p][t][s].load()));
+            else out += '.';
+        }
+        return out;
+    }
+    std::string out(static_cast<size_t>(len), '.');
     const bool melodic = t >= T_BASS;
-    for (int s = 0; s < kSteps; ++s) {
+    for (int s = 0; s < len; ++s) {
         const uint8_t v = sh.on[p][t][s].load();
         const int k = stepKind(v);
         const int n = std::clamp<int>(sh.note[p][t][s].load(), 0, 9);
@@ -639,53 +778,133 @@ std::string encodeRow(const Shared& sh, int p, int t) {
     return out;
 }
 
-void setRow(Shared& sh, int p, int t, const std::string& row) {
-    uint8_t codes[kSteps];
-    int8_t notes[kSteps];
-    parseRow(row, t >= T_BASS, codes, notes);
-    for (int s = 0; s < kSteps; ++s) {
+int setRow(Shared& sh, int p, int t, const std::string& row) {
+    uint8_t codes[kMaxSteps];
+    int8_t notes[kMaxSteps];
+    const int n = parseRow(row, t, codes, notes);
+    for (int s = 0; s < kMaxSteps; ++s) {
         sh.on[p][t][s].store(codes[s]);
         sh.note[p][t][s].store(notes[s]);
     }
+    return n;
+}
+
+// "track:step:pitch:decay:filter" tokens.
+static void parseLocks(const std::string& text, int8_t out[kTracks][kMaxSteps][kLocks]) {
+    for (int t = 0; t < kTracks; ++t)
+        for (int s = 0; s < kMaxSteps; ++s)
+            for (int l = 0; l < kLocks; ++l) out[t][s][l] = 0;
+    size_t i = 0;
+    while (i < text.size()) {
+        while (i < text.size() && text[i] == ' ') ++i;
+        size_t j = text.find(' ', i);
+        if (j == std::string::npos) j = text.size();
+        int v[5] = {-1, -1, 0, 0, 0};
+        if (j > i && std::sscanf(text.substr(i, j - i).c_str(), "%d:%d:%d:%d:%d", &v[0], &v[1], &v[2], &v[3], &v[4]) == 5 &&
+            v[0] >= 0 && v[0] < kTracks && v[1] >= 0 && v[1] < kMaxSteps) {
+            out[v[0]][v[1]][LOCK_PITCH] = static_cast<int8_t>(std::clamp(v[2], -24, 24));
+            out[v[0]][v[1]][LOCK_DECAY] = static_cast<int8_t>(std::clamp(v[3], -100, 100));
+            out[v[0]][v[1]][LOCK_FILTER] = static_cast<int8_t>(std::clamp(v[4], -100, 100));
+        }
+        i = j;
+    }
+}
+
+void applyLocks(Shared& sh, int p, const std::string& text) {
+    static int8_t buf[kTracks][kMaxSteps][kLocks];
+    parseLocks(text, buf);
+    for (int t = 0; t < kTracks; ++t)
+        for (int s = 0; s < kMaxSteps; ++s)
+            for (int l = 0; l < kLocks; ++l) sh.lock[p][t][s][l].store(buf[t][s][l]);
+}
+
+std::string encodeLocks(const Shared& sh, int p) {
+    std::string out;
+    for (int t = 0; t < kTracks; ++t)
+        for (int s = 0; s < kMaxSteps; ++s) {
+            const int a = sh.lock[p][t][s][0].load(), b = sh.lock[p][t][s][1].load(), c = sh.lock[p][t][s][2].load();
+            if (!a && !b && !c) continue;
+            out += std::to_string(t) + ":" + std::to_string(s) + ":" + std::to_string(a) + ":" + std::to_string(b) + ":" +
+                   std::to_string(c) + " ";
+        }
+    if (!out.empty()) out.pop_back();
+    return out;
+}
+
+int presetLength(const PatternDef& pd) {
+    int len = kSteps;
+    uint8_t codes[kMaxSteps];
+    int8_t notes[kMaxSteps];
+    for (int t = 0; t < kTracks; ++t) len = std::max(len, parseRow(pd.rows[static_cast<size_t>(t)], t, codes, notes));
+    return std::min(kMaxSteps, (len + kSteps - 1) / kSteps * kSteps);
 }
 
 bool factoryUnchanged(const Shared& sh, int p) {
     const int slot = p % kMaxSlots;
     if (slot >= kFactorySlots) return false;
     const PatternDef& pd = styleOf(p).patterns[static_cast<size_t>(slot)];
+    if (sh.patternLength(p) != presetLength(pd)) return false;
+    {
+        static int8_t want[kTracks][kMaxSteps][kLocks];
+        parseLocks(pd.locks, want);
+        for (int t = 0; t < kTracks; ++t)
+            for (int s = 0; s < kMaxSteps; ++s)
+                for (int l = 0; l < kLocks; ++l)
+                    if (sh.lock[p][t][s][l].load() != want[t][s][l]) return false;
+    }
     for (int t = 0; t < kTracks; ++t) {
-        uint8_t codes[kSteps];
-        int8_t notes[kSteps];
-        parseRow(pd.rows[static_cast<size_t>(t)], t >= T_BASS, codes, notes);
-        for (int s = 0; s < kSteps; ++s) {
+        uint8_t codes[kMaxSteps];
+        int8_t notes[kMaxSteps];
+        parseRow(pd.rows[static_cast<size_t>(t)], t, codes, notes);
+        for (int s = 0; s < kMaxSteps; ++s) {
             if (sh.on[p][t][s].load() != codes[s]) return false;
-            if (stepSounds(codes[s]) && t >= T_BASS && sh.note[p][t][s].load() != notes[s]) return false;
+            if (s < sh.patternLength(p) && stepSounds(codes[s]) && t >= T_BASS && sh.note[p][t][s].load() != notes[s]) return false;
         }
     }
     return true;
 }
 
 void copyPattern(Shared& sh, int from, int to) {
+    sh.length[to].store(sh.length[from].load());
     for (int t = 0; t < kTracks; ++t)
-        for (int s = 0; s < kSteps; ++s) {
+        for (int s = 0; s < kMaxSteps; ++s) {
             sh.on[to][t][s].store(sh.on[from][t][s].load());
             sh.note[to][t][s].store(sh.note[from][t][s].load());
+            for (int l = 0; l < kLocks; ++l) sh.lock[to][t][s][l].store(sh.lock[from][t][s][l].load());
         }
 }
 
 void clearPattern(Shared& sh, int p) {
     for (int t = 0; t < kTracks; ++t)
-        for (int s = 0; s < kSteps; ++s) {
+        for (int s = 0; s < kMaxSteps; ++s) {
             sh.on[p][t][s].store(STEP_OFF);
             sh.note[p][t][s].store(0);
+            for (int l = 0; l < kLocks; ++l) sh.lock[p][t][s][l].store(0);
         }
+}
+
+void setPatternLength(Shared& sh, int p, int len) {
+    len = std::max(kSteps, std::min(kMaxSteps, (len / kSteps) * kSteps));
+    const int old = sh.patternLength(p);
+    // Growing: repeat the existing bars into the new ones so it keeps playing the same.
+    for (int s = old; s < len; ++s)
+        for (int t = 0; t < kTracks; ++t) {
+            sh.on[p][t][s].store(sh.on[p][t][s % old].load());
+            sh.note[p][t][s].store(sh.note[p][t][s % old].load());
+            for (int l = 0; l < kLocks; ++l) sh.lock[p][t][s][l].store(sh.lock[p][t][s % old][l].load());
+        }
+    sh.length[p].store(static_cast<uint8_t>(len));
 }
 
 void loadPreset(Shared& sh, int pattern) {
     const int slot = pattern % kMaxSlots;
     if (slot >= kFactorySlots) return;
+    clearPattern(sh, pattern);
     const PatternDef& pd = styleOf(pattern).patterns[static_cast<size_t>(slot)];
-    for (int t = 0; t < kTracks; ++t) setRow(sh, pattern, t, pd.rows[static_cast<size_t>(t)]);
+    int len = kSteps;
+    for (int t = 0; t < kTracks; ++t) len = std::max(len, setRow(sh, pattern, t, pd.rows[static_cast<size_t>(t)]));
+    sh.length[pattern].store(static_cast<uint8_t>(std::min(kMaxSteps, (len + kSteps - 1) / kSteps * kSteps)));
+    applyLocks(sh, pattern, pd.locks);
     sh.patternName[pattern] = pd.name;
 }
 
@@ -713,11 +932,15 @@ std::vector<LeadPatch> buildLeads() {
         p.poly.attack = attack; p.poly.decay = decay; p.poly.sustain = sustain; p.poly.release = release;
         p.poly.cutoff = cutoff; p.poly.envAmt = envAmt; p.poly.envDecay = envDecay; p.poly.res = res;
         p.poly.detune = detune; p.poly.gain = 1.f;
+        p.poly.unison = osc == ChordOsc::Saw ? 3 : 1;
+        p.poly.spread = 0.6f;
+        p.poly.chorus = (osc == ChordOsc::EPiano || osc == ChordOsc::Organ) ? 0.6f : 0.2f;
         p.gain = gain; p.verb = verb; p.delay = delay;
         v.push_back(p);
     };
     //    name               group     osc               att    dec   sus   rel   cut    env    envD  res   det   gain  verb  delay
     poly("Supersaw lead",   "Leads",  ChordOsc::Saw,     0.005f, 1.5f, 0.75f, 5.f, 3200,  3500,  5,    1.2f, 0.8f, 0.55f, 0.25f, 0.2f);
+    v.back().poly.unison = 7; v.back().poly.spread = 1.f; v.back().poly.detune = 1.1f;
     poly("Square lead",     "Leads",  ChordOsc::Square,  0.005f, 2.f,  0.7f,  6.f, 2400,  2500,  6,    1.4f, 0.f,  0.45f, 0.2f,  0.2f);
     poly("Brass",           "Leads",  ChordOsc::Saw,     0.04f,  1.2f, 0.8f,  5.f, 900,   2600,  4,    1.0f, 0.4f, 0.55f, 0.2f,  0.05f);
     poly("Pluck",           "Leads",  ChordOsc::Saw,     0.002f, 6.f,  0.f,   8.f, 450,   4200,  14,   1.3f, 0.3f, 0.6f,  0.25f, 0.25f);
@@ -741,6 +964,7 @@ std::vector<LeadPatch> buildLeads() {
     {
         MonoDef m; m.saw = 1; m.sub = 0; m.cutoff = 220; m.envAmt = 3000; m.envDecay = 6; m.res = 6.f; m.release = 25;
         m.glide = 0.06f; m.drive = 1.8f; m.oscOctave = 0;
+        m.filter = 1; m.width = 0.f;
         mono("Acid lead", m, 0, 0.8f, 0.15f, 0.25f);
     }
     {
@@ -751,6 +975,7 @@ std::vector<LeadPatch> buildLeads() {
     {
         MonoDef m; m.saw = 1; m.sub = 0.6f; m.detune = 0.48f; m.cutoff = 260; m.envAmt = 2400; m.envDecay = 4; m.res = 1.6f;
         m.release = 9; m.drive = 2.2f; m.oscOctave = 0;
+        m.filter = 1; m.width = 0.6f;
         mono("Reese bass", m, 0, 0.9f, 0.05f, 0.f);
     }
     {
@@ -761,6 +986,7 @@ std::vector<LeadPatch> buildLeads() {
     {
         MonoDef m; m.saw = 0.8f; m.square = 0.6f; m.sub = 0.7f; m.detune = 0.3f; m.cutoff = 160; m.envAmt = 0;
         m.lfoDepth = 2200; m.lfoRate = 2.f; m.res = 3.f; m.drive = 3.f; m.release = 10; m.oscOctave = 0;
+        m.filter = 1; m.width = 0.5f;
         mono("Wobble bass", m, 0, 0.8f, 0.05f, 0.f);
     }
     {

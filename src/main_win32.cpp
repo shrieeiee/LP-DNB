@@ -3,7 +3,11 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <shellapi.h>
 #include <d3d11.h>
+
+#include <string>
+#include <vector>
 
 #include <algorithm>
 
@@ -25,6 +29,8 @@ IDXGISwapChain* gSwapChain = nullptr;
 ID3D11RenderTargetView* gRtv = nullptr;
 UINT gResizeW = 0, gResizeH = 0;
 bool gOccluded = false;
+std::vector<std::string>* gDropped = nullptr;  // files dragged onto the window
+float* gDropXY = nullptr;
 
 void createRenderTarget() {
     ID3D11Texture2D* back = nullptr;
@@ -91,6 +97,24 @@ LRESULT WINAPI wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                          SWP_NOZORDER | SWP_NOACTIVATE);
             return 0;
         }
+        case WM_DROPFILES: {
+            HDROP drop = reinterpret_cast<HDROP>(wParam);
+            POINT pt{};
+            DragQueryPoint(drop, &pt);
+            if (gDropXY) { gDropXY[0] = static_cast<float>(pt.x); gDropXY[1] = static_cast<float>(pt.y); }
+            const UINT n = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            for (UINT i = 0; i < n && gDropped; ++i) {
+                const UINT len = DragQueryFileW(drop, i, nullptr, 0);
+                std::wstring w(len, L'\0');
+                DragQueryFileW(drop, i, &w[0], len + 1);
+                const int u = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+                std::string s8(static_cast<size_t>(u > 0 ? u - 1 : 0), '\0');
+                if (u > 1) WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &s8[0], u, nullptr, nullptr);
+                gDropped->push_back(s8);
+            }
+            DragFinish(drop);
+            return 0;
+        }
         case WM_SYSCOMMAND:
             if ((wParam & 0xfff0) == SC_KEYMENU) return 0;  // Alt doesn't open a menu
             break;
@@ -128,7 +152,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const int w = std::min(static_cast<int>(1440 * dpi), static_cast<int>(work.right - work.left));
     const int h = std::min(static_cast<int>(900 * dpi), static_cast<int>(work.bottom - work.top));
-    HWND hwnd = CreateWindowW(wc.lpszClassName, L"LP-DNB  \u2013  drum & bass for Launchpad Mini", WS_OVERLAPPEDWINDOW,
+    HWND hwnd = CreateWindowW(wc.lpszClassName, L"LP-DNB  \u2013  groovebox for Launchpad Mini", WS_OVERLAPPEDWINDOW,
                               work.left + (work.right - work.left - w) / 2, work.top + (work.bottom - work.top - h) / 2,
                               w, h, nullptr, nullptr, wc.hInstance, nullptr);
 
@@ -148,6 +172,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
 
     dnb::GuiState gs;
     gs.scale = dpi;
+    gDropped = &gs.dropped;
+    static float dropXY[2] = {-1.f, -1.f};
+    gDropXY = dropXY;
+    DragAcceptFiles(hwnd, TRUE);
     dnb::setupGuiStyle(dpi);
 
     // Built-in rounded font (Nunito): normal text, pad labels, and the big Play button.
@@ -192,6 +220,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int) {
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+        gs.dropX = dropXY[0];
+        gs.dropY = dropXY[1];
         dnb::drawGui(app, gs, now);
         ImGui::Render();
 

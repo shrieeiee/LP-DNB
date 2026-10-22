@@ -55,6 +55,7 @@ int findContaining(const std::vector<std::string>& v, const char* needle) {
 
 struct MidiHub::KbPort {
     MidiHub* hub = nullptr;
+    std::atomic<bool> clock{false};  // this input is the clock source
     std::atomic<int> route{ROUTE_LEAD};
     std::unique_ptr<RtMidiIn> in;
     std::atomic<double> lastActivity{-10.0};
@@ -174,7 +175,8 @@ void MidiHub::scan(double now) {
             continue;
         }
         failedOnce_.erase(name);
-        kb->in->ignoreTypes(true, true, true);
+        kb->clock = name == clockIn_;
+        kb->in->ignoreTypes(true, !kb->clock.load(), true);
         kb->route = keyboardRoute(name);
         kb->in->setCallback(&MidiHub::onKeyboardMsg, kb.get());
         static const char* what[3] = {"the lead synth", "the bass", "the drums"};
@@ -249,6 +251,24 @@ void MidiHub::onLaunchpadMsg(double, std::vector<unsigned char>* msg, void* user
 
 void MidiHub::onKeyboardMsg(double, std::vector<unsigned char>* msg, void* user) {
     auto* kb = static_cast<KbPort*>(user);
+    if (!msg->empty() && (*msg)[0] >= 0xF8) {  // real-time: clock, start, continue, stop
+        if (!kb->clock.load()) return;
+        MidiHub* h = kb->hub;
+        const unsigned char b = (*msg)[0];
+        const double t = monotonicSec();
+        if (b == 0xF8) {
+            const double dt = t - h->clockLast_.load();
+            h->clockLast_.store(t);
+            if (dt > 0.004 && dt < 0.1) {  // 25..625 BPM
+                const double old = h->clockInterval_.load();
+                h->clockInterval_.store(old <= 0.0 ? dt : old * 0.96 + dt * 0.04);
+            }
+        } else if (b == 0xFA || b == 0xFB || b == 0xFC) {
+            std::lock_guard<std::mutex> lk(h->mu_);
+            h->queue_.push_back({MidiMsg::CLOCK, ROUTE_LEAD, *msg});
+        }
+        return;
+    }
     kb->lastActivity.store(monotonicSec());
     std::lock_guard<std::mutex> lk(kb->hub->mu_);
     kb->hub->queue_.push_back({MidiMsg::KEYBOARD, kb->route.load(), *msg});
@@ -298,6 +318,23 @@ void MidiHub::setKeyboardEnabled(const std::string& name, bool on) {
         kbDisabled_.insert(name);
     }
     forceRescan();
+}
+
+void MidiHub::setClockIn(const std::string& name) {
+    if (name == clockIn_) return;
+    clockIn_ = name;
+    clockInterval_ = 0.0;
+    clockLast_ = -10.0;
+    for (auto& kv : kbs_) {
+        kv.second->clock = kv.first == name;
+        if (kv.second->in) kv.second->in->ignoreTypes(true, !kv.second->clock.load(), true);
+    }
+    if (!name.empty()) logf("Following MIDI clock from %s", name.c_str());
+}
+
+float MidiHub::clockInBpm(double now) const {
+    if (clockIn_.empty() || now - clockLast_.load() > 0.5 || clockInterval_.load() <= 0.0) return 0.f;
+    return static_cast<float>(60.0 / (clockInterval_.load() * 24.0));
 }
 
 // ------------------------------------------------------------------ LEDs --

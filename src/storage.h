@@ -23,9 +23,20 @@ struct Settings {
     bool leadSnap = false;
     std::map<std::string, int> routes;   // MIDI input name -> what it plays
     std::set<std::string> disabledInputs;
+    int audioBuffer = 256;               // frames per audio period
+    bool audioExclusive = false;         // Windows: WASAPI exclusive mode
+    std::string clockOut, clockIn;       // MIDI clock output / input port ("" = off)
+    // Sampled drums: style name -> slot -> WAV path ("" = synth).
+    std::map<std::string, std::map<int, std::string>> samples;
 };
 
 std::string dataFilePath();
+// Where recordings and MIDI exports go (Music/LP-DNB; created if needed).
+std::string outputDir();
+// "2026-10-22 14-03-11"
+std::string timeStamp();
+// Replaces characters that aren't allowed in file names.
+std::string safeFileName(const std::string& s);
 std::string serialize(const Shared& sh, const Settings& st);
 // Loads patterns into `sh` (after the built-ins are loaded) and fills `st`.
 // Returns false if there was no file; `message` says what happened.

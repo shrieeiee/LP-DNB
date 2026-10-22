@@ -50,6 +50,8 @@ struct MonoDef {
     float drop = 0.f, dropRate = 25.f;  // 808-style pitch drop in semitones at note start
     float lfoDepth = 0.f, lfoRate = 0.f;  // filter LFO in Hz depth, cycles per beat
     float drive = 2.f, gain = 1.f, accent = 1.6f;
+    int filter = 0;            // 0 = 12 dB state-variable, 1 = 24 dB ladder (303 / Moog style)
+    float width = 0.3f;        // stereo spread of the detuned saws (sub stays centred)
 };
 
 // ----------------------------------------------------------------- chords --
@@ -67,6 +69,9 @@ struct ChordDef {
     float cutoff = 3000.f, envAmt = 0.f, envDecay = 8.f, res = 0.9f;
     float detune = 0.3f;       // percent
     float gain = 0.8f, verb = 0.25f, delay = 0.1f;
+    int unison = 2;            // saw voices per note (1-7; 7 = supersaw)
+    float spread = 0.6f;       // stereo spread 0..1
+    float chorus = 0.f;        // chorus send 0..1 (scaled by the global chorus amount)
 };
 
 // --------------------------------------------------------------- patterns --
@@ -77,7 +82,8 @@ struct ChordDef {
 // Chord rows: . rest   - hold   0-9 chord on that scale degree (A-J accent)
 struct PatternDef {
     std::string name;
-    std::array<std::string, kTracks> rows;
+    std::array<std::string, kTracks> rows;  // 16, 32, 48 or 64 steps
+    std::string locks;  // per-step parameter locks: "track:step:pitch:decay:filter ..." (decay/filter -100..100)
 };
 
 struct Style {
@@ -88,7 +94,8 @@ struct Style {
     int root = 29;             // MIDI note of the bass root (F1 = 29)
     std::array<int, 7> scale{0, 2, 3, 5, 7, 8, 10};
     std::string keyName;
-    float duck = 0.5f;         // how much the kick ducks bass + chords
+    float duck = 0.5f;         // how much the kick ducks bass + chords (sidechain depth)
+    float duckRelease = 0.16f; // sidechain release, seconds
     float trim = 1.f;          // overall level, so styles sit at similar loudness
     std::array<DrumDef, 7> drums;  // 0-5 = sequenced drum tracks, 6 = extra pad
     MonoDef bass;
@@ -118,12 +125,17 @@ void loadPreset(Shared& sh, int pattern);  // built-in slot only (slot < kFactor
 void loadAllPresets(Shared& sh);           // every style's built-in patterns + names
 
 // Pattern rows as text, in the same format as the built-in patterns above.
-void parseRow(const std::string& row, bool melodic, uint8_t codes[kSteps], int8_t notes[kSteps]);
+// The lead row is space-separated MIDI notes ("60 - . 63"). Returns the row's step count.
+int parseRow(const std::string& row, int track, uint8_t codes[kMaxSteps], int8_t notes[kMaxSteps]);
 std::string encodeRow(const Shared& sh, int pattern, int track);
-void setRow(Shared& sh, int pattern, int track, const std::string& row);
+int setRow(Shared& sh, int pattern, int track, const std::string& row);
 bool factoryUnchanged(const Shared& sh, int pattern);  // built-in pattern still as shipped
 void copyPattern(Shared& sh, int from, int to);
 void clearPattern(Shared& sh, int pattern);
+void setPatternLength(Shared& sh, int pattern, int steps);  // 16/32/48/64; growing repeats the bars
+void applyLocks(Shared& sh, int pattern, const std::string& text);  // PatternDef::locks format
+std::string encodeLocks(const Shared& sh, int pattern);
+int presetLength(const PatternDef& pd);
 
 // ------------------------------------------------------------ lead synth --
 // Sounds for the second MIDI instrument. Poly patches use the chord synth one

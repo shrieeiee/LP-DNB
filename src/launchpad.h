@@ -33,7 +33,7 @@ using Frame = std::array<uint8_t, 80>;
 enum KbRoute : int { ROUTE_LEAD = 0, ROUTE_BASS = 1, ROUTE_DRUMS = 2 };
 
 struct MidiMsg {
-    enum Source { LAUNCHPAD, KEYBOARD } source = LAUNCHPAD;
+    enum Source { LAUNCHPAD, KEYBOARD, CLOCK } source = LAUNCHPAD;  // CLOCK: Start / Continue / Stop
     int route = ROUTE_LEAD;  // for keyboards
     std::vector<unsigned char> bytes;
 };
@@ -84,6 +84,12 @@ public:
     void restore(const std::map<std::string, int>& routes, const std::set<std::string>& disabled);
     double launchpadLastActivity() const { return lpActivity_.load(); }
 
+    // --- Follow MIDI clock from one input ("" = off): tempo, Start and Stop.
+    void setClockIn(const std::string& name);
+    const std::string& clockIn() const { return clockIn_; }
+    // Tempo measured from the incoming clock, or 0 if none arrived lately.
+    float clockInBpm(double now) const;
+
 private:
     struct KbPort;
     static void onLaunchpadMsg(double, std::vector<unsigned char>* msg, void* user);
@@ -116,6 +122,9 @@ private:
 
     mutable std::mutex mu_;
     std::vector<MidiMsg> queue_;
+
+    std::string clockIn_;
+    std::atomic<double> clockLast_{-10.0}, clockInterval_{0.0};
 };
 
 }  // namespace dnb

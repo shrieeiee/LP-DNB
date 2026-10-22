@@ -74,11 +74,12 @@ int runDemo(const std::string& path, bool all) {
         for (int k = 0; k < (all ? kFactorySlots : 2); ++k) segs.push_back(s * kMaxSlots + k);
     const int barsPerSeg = 2;
 
-    struct Stat { double peak = 0, sum = 0; size_t n = 0; bool bad = false; };
+    struct Stat { double peak = 0, sum = 0, gr = 0; size_t n = 0, blocks = 0; bool bad = false; };
     std::vector<Stat> stats(segs.size());
 
     sh->send(Cmd::QueuePattern, segs[0]);
     sh->send(Cmd::Play);
+    const auto wall0 = std::chrono::steady_clock::now();
     std::vector<float> audio;
     std::vector<float> buf(64 * 2);
     size_t seg = 0;
@@ -122,6 +123,8 @@ int runDemo(const std::string& path, bool all) {
         if (seg >= segs.size()) break;
         if (bar >= 0) {
             Stat& s = stats[seg];
+            s.gr += sh->gainReduction.load();
+            ++s.blocks;
             for (float v : buf) {
                 if (!std::isfinite(v)) { s.bad = true; v = 0.f; }
                 s.peak = std::max(s.peak, static_cast<double>(std::fabs(v)));
@@ -132,14 +135,16 @@ int runDemo(const std::string& path, bool all) {
         }
     }
 
-    std::printf("%-12s %-18s %6s %6s\n", "Style", "Pattern", "Peak", "RMS");
+    std::printf("%-12s %-18s %6s %6s %6s\n", "Style", "Pattern", "Peak", "RMS", "GR dB");
     for (size_t i = 0; i < segs.size(); ++i) {
         const Style& st = styleOf(segs[i]);
         const Stat& s = stats[i];
-        std::printf("%-12s %-18s %6.3f %6.3f%s\n", st.name.c_str(), st.patterns[static_cast<size_t>(segs[i] % kMaxSlots)].name.c_str(),
-                    s.peak, s.n ? std::sqrt(s.sum / s.n) : 0.0, s.bad ? "  ** NON-FINITE **" : "");
+        std::printf("%-12s %-18s %6.3f %6.3f %6.1f%s\n", st.name.c_str(), st.patterns[static_cast<size_t>(segs[i] % kMaxSlots)].name.c_str(),
+                    s.peak, s.n ? std::sqrt(s.sum / s.n) : 0.0, s.blocks ? s.gr / s.blocks : 0.0, s.bad ? "  ** NON-FINITE **" : "");
         badTotal += s.bad ? 1 : 0;
     }
+    const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall0).count();
+    std::printf("Rendered %.1f s of audio in %.2f s (%.1f%% of one core)\n", audio.size() / 2.0 / sr, wall, 100.0 * wall / (audio.size() / 2.0 / sr));
     if (!path.empty()) {
         writeWav(path, audio, sr);
         std::printf("Wrote %s (%.1f s)\n", path.c_str(), audio.size() / 2.0 / sr);

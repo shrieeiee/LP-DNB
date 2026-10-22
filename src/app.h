@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "clock.h"
 #include "common.h"
 #include "controller.h"
 #include "launchpad.h"
@@ -15,6 +16,7 @@
 namespace dnb {
 
 class Engine;
+struct Sample;
 
 class App {
 public:
@@ -38,6 +40,35 @@ public:
     void selectAudio(const std::string& name);                               // "" = system default
     const std::string& audioStatus() const { return audioStatus_; }
     bool audioRunning() const;
+    // Lower buffer = less delay between pressing a pad and hearing it (more CPU risk).
+    int audioBuffer() const { return audioBuffer_; }
+    void setAudioBuffer(int frames);
+    bool audioExclusive() const { return audioExclusive_; }  // Windows WASAPI exclusive mode
+    void setAudioExclusive(bool on);
+    double audioLatencyMs() const { return latencyMs_; }
+
+    // ---- Sampled drums: any drum sound can be a WAV instead of the synth.
+    // path "" = back to the synth. Returns false (and sets err) if it couldn't load.
+    bool setDrumSample(int style, int slot, const std::string& path, std::string* err = nullptr);
+    std::string drumSample(int style, int slot) const;
+    // Picks files from a folder by name (kick, snare, hat...). Returns how many were used.
+    int loadKitFolder(int style, const std::string& folder);
+
+    // ---- Recording and export (files go in outputFolder()).
+    std::string outputFolder() const;
+    bool startRecording();
+    void stopRecording();
+    bool recording() const { return recording_; }
+    double recordingSeconds() const;
+    const std::string& lastFile() const { return lastFile_; }
+    std::string exportMidi();  // the playing pattern as a .mid file; returns its path ("" on failure)
+
+    // ---- MIDI clock.
+    void setClockOut(const std::string& port);
+    const std::string& clockOutPort() const { return clock_->port(); }
+    bool clockOutOpen() const { return clock_->isOpen(); }
+    void setClockIn(const std::string& port) { midi_->setClockIn(port); nextSave_ = 0.0; }
+    float clockInBpm() const { return clockBpm_; }
 
     // ---- Pattern bank (your own patterns, saved between sessions).
     // Returns the new pattern index, or -1 if the style already has kMaxSlots patterns.
@@ -90,6 +121,21 @@ private:
 
     std::string lastSaved_;
     double nextSave_ = 0.0;
+
+    int audioBuffer_ = 256;
+    bool audioExclusive_ = false;
+    double latencyMs_ = 0.0;
+
+    std::shared_ptr<Sample> samples_[kMaxStyles][kDrumSlots];
+    std::vector<std::pair<double, std::shared_ptr<Sample>>> retired_;  // freed once the engine let go
+
+    struct Recorder;
+    std::unique_ptr<Recorder> rec_;
+    bool recording_ = false;
+    std::string lastFile_;
+
+    std::unique_ptr<MidiClockOut> clock_;
+    float clockBpm_ = 0.f;
 };
 
 }  // namespace dnb

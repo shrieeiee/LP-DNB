@@ -18,6 +18,8 @@ set(CORE_SOURCES
   src/app.cpp
   src/styles.cpp
   src/storage.cpp
+  src/sample.cpp
+  src/clock.cpp
   src/engine.cpp
   src/controller.cpp
   src/launchpad.cpp
@@ -37,7 +39,7 @@ if(WIN32)
     ${IMGUI_DIR}/backends/imgui_impl_win32.cpp
     ${IMGUI_DIR}/backends/imgui_impl_dx11.cpp)
   target_include_directories(lp-dnb PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
-  target_link_libraries(lp-dnb PRIVATE d3d11 d3dcompiler dxgi dwmapi)
+  target_link_libraries(lp-dnb PRIVATE d3d11 d3dcompiler dxgi dwmapi comdlg32 shell32 ole32)
   # A windowed app: no console window (MSVC needs the entry point spelled out with WinMain).
   if(MSVC)
     target_link_options(lp-dnb PRIVATE /SUBSYSTEM:WINDOWS)
@@ -79,3 +81,10 @@ endif()
 
 # Make "Start" in Visual Studio run lp-dnb instead of ALL_BUILD.
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT lp-dnb)
+
+# Offline self-test of the engine and file formats (no audio device or MIDI needed).
+add_executable(lp-dnb-tests tests/selftest.cpp src/styles.cpp src/storage.cpp src/sample.cpp src/engine.cpp)
+target_include_directories(lp-dnb-tests PRIVATE src)
+if(WIN32)
+  target_compile_definitions(lp-dnb-tests PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+endif()

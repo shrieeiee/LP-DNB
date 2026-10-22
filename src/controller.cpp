@@ -95,6 +95,7 @@ Color fxColor(int fx) {
 std::string trackName(const Style& s, int t) {
     if (t == T_BASS) return s.bass.name;
     if (t == T_CHORD) return s.chord.name;
+    if (t == T_LEAD) return "Lead (recorded)";
     if (t >= 0 && t < kDrumTracks) return s.drums[static_cast<size_t>(t)].name;
     return "?";
 }
@@ -225,7 +226,9 @@ void Controller::onGrid(int x, int y, bool down, double now) {
 
     // rows 0..3
     if (view_ == EDIT && y < 2) {
-        const int s = y * 8 + x;
+        const int bars = sh_.patternLength(p) / kSteps;
+        if (editBar_ >= bars) editBar_ = bars - 1;
+        const int s = editBar_ * kSteps + y * 8 + x;
         if (down) {
             const bool on = stepSounds(sh_.on[p][selTrack_][s].load());
             sh_.on[p][selTrack_][s].store(on ? STEP_OFF : STEP_ON);
@@ -247,7 +250,10 @@ void Controller::onScene(int row, bool down) {
     const Style& st = styleOf(p);
     if (view_ == EDIT) {
         if (viewHeld_) {
-            for (int s = 0; s < kSteps; ++s) sh_.on[p][row][s].store(STEP_OFF);
+            for (int s = 0; s < kMaxSteps; ++s) {
+                sh_.on[p][row][s].store(STEP_OFF);
+                for (int l = 0; l < kLocks; ++l) sh_.lock[p][row][s][l].store(0);
+            }
             comboUsed_ = true;
             logf("Cleared %s", trackName(st, row).c_str());
         } else {
@@ -301,6 +307,17 @@ void Controller::onTop(int i, bool down, double now) {
                 }
                 break;
             }
+            // EDIT view of a long pattern: these pick which bar is on the top rows.
+            if (view_ == EDIT && sh_.patternLength(sh_.pattern.load()) > kSteps) {
+                if (down) {
+                    const int bars = sh_.patternLength(sh_.pattern.load()) / kSteps;
+                    editBar_ = std::clamp(editBar_ + (i == 2 ? -1 : 1), 0, bars - 1);
+                    ++editBarPresses_;
+                    heldStep_ = -1;
+                    logf("Editing bar %d of %d", editBar_ + 1, bars);
+                }
+                break;
+            }
             if (down) {
                 bpmHeld_ = i == 2 ? -1 : 1;
                 nudgeBpm(static_cast<float>(bpmHeld_));
@@ -319,11 +336,7 @@ void Controller::onTop(int i, bool down, double now) {
                     if (slot >= sh_.slotCount[src / kMaxSlots].load()) break;
                     const int dst = (src / kMaxSlots) * kMaxSlots + slot;
                     if (dst != src) {
-                        for (int t = 0; t < kTracks; ++t)
-                            for (int s = 0; s < kSteps; ++s) {
-                                sh_.on[dst][t][s].store(sh_.on[src][t][s].load());
-                                sh_.note[dst][t][s].store(sh_.note[src][t][s].load());
-                            }
+                        copyPattern(sh_, src, dst);
                         logf("Copied \"%s\" over \"%s\"", sh_.patternName[src].c_str(), sh_.patternName[dst].c_str());
                     }
                     comboUsed_ = true;
@@ -742,10 +755,12 @@ void Controller::render(double now, Frame& out) {
     const int curStep = sh_.step.load();
 
     // EDIT view: 16 steps of the selected track on the top two rows.
+    const int bars = sh_.patternLength(p) / kSteps;
+    if (editBar_ >= bars) editBar_ = bars - 1;
     if (view_ == EDIT) {
         const Color tc = slotColor(st, selTrack_);
-        for (int s = 0; s < kSteps; ++s) {
-            const int x = s % 8, y = s / 8;
+        for (int s = editBar_ * kSteps; s < (editBar_ + 1) * kSteps; ++s) {
+            const int x = s % 8, y = (s % kSteps) / 8;
             const uint8_t v = sh_.on[p][selTrack_][s].load();
             const bool on = stepSounds(v);
             Color c = (s % 4 == 0) ? DIM_RED : OFF;
@@ -842,7 +857,7 @@ void Controller::render(double now, Frame& out) {
         for (int x = 0; x < 8; ++x) out[y * 8 + x] = quant(grid[y][x]);
 
     // Scene buttons (right column).
-    for (int t = 0; t < kTracks; ++t) {
+    for (int t = 0; t < kPadTracks; ++t) {
         Color c;
         const bool muted = sh_.mute[t].load();
         if (view_ == EDIT) {
@@ -864,6 +879,9 @@ void Controller::render(double now, Frame& out) {
         const int pages = (sh_.slotCount[styleIdx].load() + 15) / 16;
         out[74] = quant(pickerPage_ > 0 ? GREEN : OFF);
         out[75] = quant(pickerPage_ < pages - 1 ? GREEN : OFF);
+    } else if (view_ == EDIT && bars > 1) {  // bar paging: lit when there's a bar that way
+        out[74] = quant(editBar_ > 0 ? GREEN : DIM_RED);
+        out[75] = quant(editBar_ < bars - 1 ? GREEN : DIM_RED);
     } else {
         out[74] = quant(bpmHeld_ < 0 ? AMBER : DIM_AMBER);
         out[75] = quant(bpmHeld_ > 0 ? AMBER : DIM_AMBER);

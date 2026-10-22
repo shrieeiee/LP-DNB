@@ -28,6 +28,9 @@ public:
     bool editView() const { return view_ == EDIT; }
     bool stylePickerShown() const { return viewHeld_; }
     int pickerPage() const { return pickerPage_; }
+    int editBar() const { return editBar_; }
+    int editBarPresses() const { return editBarPresses_; }  // bumps when BPM-/+ change the bar
+    void setEditBar(int b) { editBar_ = b < 0 ? 0 : (b > 3 ? 3 : b); }
     int selectedTrack() const { return selTrack_; }
     void selectTrack(int t) { selTrack_ = t; heldStep_ = -1; }
     bool fxHeld(int fx) const { return fx >= 0 && fx < FX_COUNT && fxHeld_[fx]; }
@@ -86,6 +89,8 @@ private:
     double lastFrame_ = 0.0;
     int lastStyle_ = -1;
     int pickerPage_ = 0;  // which 16 patterns the View picker shows
+    int editBar_ = 0;     // EDIT view: which bar of a long pattern is on the top rows
+    int editBarPresses_ = 0;
     double styleChangedAt_ = -10.0;
     Rng rng_;
 };
