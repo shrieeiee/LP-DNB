@@ -16,6 +16,7 @@
 #include "sample.h"
 #include "storage.h"
 #include "styles.h"
+#include "tenori.h"
 
 using namespace dnb;
 
@@ -234,6 +235,165 @@ static void testKitFolder() {
     fs::remove_all(dir);
 }
 
+// --------------------------------------------------- scheduled notes --
+// Renders on a virtual clock (block start = vt) so the timing is exact.
+struct VClock {
+    Engine& e;
+    double vt;
+    std::vector<float> out;
+    void run(int frames, Tenori* t = nullptr) {
+        std::vector<float> buf(512);
+        for (int i = 0; i < frames; i += 256) {
+            if (t) t->schedule(vt + 0.06);
+            e.process(buf.data(), 256, vt);
+            vt += 256.0 / 48000.0;
+            out.insert(out.end(), buf.begin(), buf.end());
+        }
+    }
+};
+
+static Cmd noteCmd(int slot, int pitch, float vel, float gate, double t) {
+    Cmd c;
+    c.type = Cmd::Note;
+    c.a = slot; c.b = pitch; c.f = vel; c.g = gate; c.t = t;
+    return c;
+}
+
+static double rms(const std::vector<float>& v, size_t fromFrame, size_t toFrame) {
+    double s = 0.0;
+    size_t n = 0;
+    for (size_t i = fromFrame * 2; i < toFrame * 2 && i < v.size(); ++i, ++n) s += v[i] * v[i];
+    return n ? std::sqrt(s / n) : 0.0;
+}
+
+static void testScheduledNotes() {
+    auto sh = std::make_unique<Shared>();
+    loadAllPresets(*sh);
+    leadPatches();
+    Engine e(*sh, 48000.f);
+    VClock vc{e, 1000.0, {}};
+    vc.run(48000 / 4);  // settle
+    vc.out.clear();
+    const double start = vc.vt;
+
+    // Stamped 100 ms ahead: held back, then lands exactly then, plus the usual one
+    // block of latency (256) and the limiter's look-ahead (72).
+    sh->cmds.push(noteCmd(0, 0, 1.f, 0.f, start + 0.1));
+    vc.run(48000 / 2);
+    int first = -1;
+    for (size_t i = 0; i < vc.out.size() / 2; ++i) if (std::fabs(vc.out[2 * i]) > 1e-3f) { first = static_cast<int>(i); break; }
+    CHECK(first >= 5120 && first <= 5136, "scheduled kick landed at sample %d (expected about 5128)", first);
+
+    // A bass note with a 50 ms gate is let go; with a 400 ms gate it's still going.
+    for (float gate : {0.05f, 0.4f}) {
+        vc.out.clear();
+        sh->cmds.push(noteCmd(kBassSlot, 0, 1.f, gate, vc.vt));
+        vc.run(48000);
+        if (gate < 0.1f) {
+            const double late = rms(vc.out, 24000, 28800);  // 500-600 ms: release tail is over
+            CHECK(late < 0.01, "short bass note should have been released (rms %.4f)", late);
+        } else {
+            const double held = rms(vc.out, 9600, 16800);  // 200-350 ms: still held
+            CHECK(held > 0.1, "long bass note should still sound (rms %.4f)", held);
+        }
+        vc.run(48000);  // let it die away
+    }
+
+    // A release only lets go of its own note: a short lead note followed by a long
+    // one on the same pitch must not cut the long one off.
+    sh->cmds.push(noteCmd(kLeadSlot, 60, 1.f, 0.05f, vc.vt));
+    sh->cmds.push(noteCmd(kLeadSlot, 60, 1.f, 1.0f, vc.vt + 0.02));
+    vc.out.clear();
+    vc.run(48000 / 2);
+    // Pluck patch decays by itself, so compare against a lone short note.
+    const double heldOn = rms(vc.out, 12000, 18000);
+    vc.run(48000 * 2);
+    sh->cmds.push(noteCmd(kLeadSlot, 60, 1.f, 0.05f, vc.vt));
+    vc.out.clear();
+    vc.run(48000 / 2);
+    const double alone = rms(vc.out, 12000, 18000);
+    CHECK(heldOn > alone * 2.0 + 1e-4, "a newer lead note was cut off by an older note's release (%.4f vs %.4f)", heldOn, alone);
+}
+
+static int hitsDuring(Shared& sh, Engine& e, Tenori& t, int slot, int steps) {
+    VClock vc{e, monotonicSec(), {}};
+    vc.run(2048);  // style switch reaches the engine
+    const uint32_t h0 = sh.hits[slot].load();
+    t.setPlaying(true, vc.vt);
+    const double stepSec = 60.0 / sh.bpm.load() / 4.0;
+    // Stop half a step before the end so the next step isn't counted.
+    vc.run(static_cast<int>((steps - 0.5) * stepSec * 48000.0) - 256, &t);
+    t.setPlaying(false, vc.vt);
+    vc.run(4096);
+    return static_cast<int>(sh.hits[slot].load() - h0);
+}
+
+static void testTenori() {
+    setEnv("LPTENORI_DATA", "tenori-test.txt");
+    std::remove("tenori-test.txt");
+    auto sh = std::make_unique<Shared>();
+    loadAllPresets(*sh);
+    leadPatches();
+    Engine e(*sh, 48000.f);
+    {
+        // Bounce: a ball from row 3 lands every 2 * (7 - 3) = 8 steps, first at step 4.
+        Tenori t(*sh);
+        t.setStyle(1);  // House: straight timing
+        for (int i = 0; i < kLayers; ++i) t.layer(i).clear();
+        t.layer(1).sound = SND_DRUMS;
+        t.layer(1).mode = MODE_BOUNCE;
+        t.layer(1).ball[0] = 3;
+        t.layer(1).resetMotion();
+        const int n = hitsDuring(*sh, e, t, 0, 32);
+        CHECK(n == 4, "bounce from row 3 should hit 4 times in 32 steps (got %d)", n);
+    }
+    {
+        // Score with a 3-step loop: a note on its first step plays every 3 steps.
+        Tenori t(*sh);
+        for (int i = 0; i < kLayers; ++i) t.layer(i).clear();
+        t.layer(0).sound = SND_DRUMS;
+        t.layer(0).mode = MODE_SCORE;
+        t.layer(0).length = 3;
+        t.layer(0).score[6] = 1;  // second drum
+        const int n = hitsDuring(*sh, e, t, 1, 30);
+        CHECK(n == 10, "3-step loop should play 10 times in 30 steps (got %d)", n);
+        // Muted layers stay quiet.
+        t.layer(0).muted = true;
+        CHECK(hitsDuring(*sh, e, t, 1, 16) == 0, "muted layer played");
+    }
+    {
+        // Path: (0,7) -> (4,7) is 4 steps, back is 4: one note every 4 steps.
+        Tenori t(*sh);
+        for (int i = 0; i < kLayers; ++i) t.layer(i).clear();
+        t.layer(6).sound = SND_DRUMS;
+        t.layer(6).mode = MODE_PATH;
+        t.layer(6).path = {{0, 7}, {4, 7}};
+        t.layer(6).resetMotion();
+        const int n = hitsDuring(*sh, e, t, 0, 16);
+        CHECK(n == 4, "path with 4-step legs should play 4 times in 16 steps (got %d)", n);
+    }
+    {
+        // Save file round trip.
+        Tenori a(*sh);
+        a.layer(2).sound = SND_CHORDS;
+        a.layer(2).octave = -1;
+        a.layer(2).length = 11;
+        a.layer(2).score[3] = 0x8421;
+        a.layer(4).ball[5] = 2;
+        a.layer(6).path = {{1, 2}, {7, 7}, {0, 0}};
+        a.layer(5).muted = true;
+        a.setLeadPatch(2);
+        const std::string text = a.serialize();
+        Tenori b(*sh);
+        CHECK(b.load(text), "tenori file didn't load");
+        CHECK(b.serialize() == text, "tenori file doesn't round-trip:\n%s\n---\n%s", text.c_str(), b.serialize().c_str());
+        a.saveIfChanged();
+        std::ifstream f("tenori-test.txt");
+        CHECK(static_cast<bool>(f), "tenori file wasn't written");
+    }
+    std::remove("tenori-test.txt");
+}
+
 int main() {
     styles();
     testWavFormats();
@@ -242,6 +402,8 @@ int main() {
     testLimiterAndStereo();
     testLongPatternsAndSong();
     testSaveRoundTrip();
+    testScheduledNotes();
+    testTenori();
     std::printf(failures ? "%d check(s) failed\n" : "All checks passed\n", failures);
     return failures ? 1 : 0;
 }

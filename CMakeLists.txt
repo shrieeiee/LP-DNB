@@ -50,40 +50,53 @@ else()
   # macOS / Linux: console version (same synth and light show, no window).
   add_executable(lp-dnb ${CORE_SOURCES} src/main_console.cpp)
 endif()
-target_include_directories(lp-dnb PRIVATE src ${rtmidi_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
-# Keep MIDI port names stable when devices are plugged in/out (no index suffix).
-target_compile_definitions(lp-dnb PRIVATE RTMIDI_DO_NOT_ENSURE_UNIQUE_PORTNAMES)
 
-if(WIN32)
-  target_compile_definitions(lp-dnb PRIVATE __WINDOWS_MM__ NOMINMAX _CRT_SECURE_NO_WARNINGS)
-  target_link_libraries(lp-dnb PRIVATE winmm)
-elseif(APPLE)
-  target_compile_definitions(lp-dnb PRIVATE __MACOSX_CORE__)
-  target_link_libraries(lp-dnb PRIVATE "-framework CoreMIDI" "-framework CoreAudio"
-                        "-framework CoreFoundation" "-framework AudioToolbox")
-else()
+# lp-tenori: a Tenori-on style sequencer on the same sound engine. A console
+# program on every platform.
+add_executable(lp-tenori ${CORE_SOURCES} src/tenori.cpp src/main_tenori.cpp)
+
+find_package(Threads REQUIRED)
+if(NOT WIN32 AND NOT APPLE)
   find_package(ALSA)
-  find_package(Threads REQUIRED)
-  if(ALSA_FOUND)
-    target_compile_definitions(lp-dnb PRIVATE __LINUX_ALSA__)
-    target_link_libraries(lp-dnb PRIVATE ALSA::ALSA)
-  else()
+  if(NOT ALSA_FOUND)
     message(WARNING "ALSA dev headers not found (install libasound2-dev): building without MIDI support")
   endif()
-  target_link_libraries(lp-dnb PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
 endif()
 
-if(MSVC)
-  target_compile_options(lp-dnb PRIVATE /W3 /O2 /fp:fast)
-else()
-  target_compile_options(lp-dnb PRIVATE -Wall -Wextra -O2)
-endif()
+# MIDI, audio and compiler settings shared by both programs.
+function(lpdnb_platform target)
+  target_include_directories(${target} PRIVATE src ${rtmidi_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
+  # Keep MIDI port names stable when devices are plugged in/out (no index suffix).
+  target_compile_definitions(${target} PRIVATE RTMIDI_DO_NOT_ENSURE_UNIQUE_PORTNAMES)
+  if(WIN32)
+    target_compile_definitions(${target} PRIVATE __WINDOWS_MM__ NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    target_link_libraries(${target} PRIVATE winmm)
+  elseif(APPLE)
+    target_compile_definitions(${target} PRIVATE __MACOSX_CORE__)
+    target_link_libraries(${target} PRIVATE "-framework CoreMIDI" "-framework CoreAudio"
+                          "-framework CoreFoundation" "-framework AudioToolbox")
+  else()
+    if(ALSA_FOUND)
+      target_compile_definitions(${target} PRIVATE __LINUX_ALSA__)
+      target_link_libraries(${target} PRIVATE ALSA::ALSA)
+    endif()
+    target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
+  endif()
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W3 /O2 /fp:fast)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -O2)
+  endif()
+endfunction()
+lpdnb_platform(lp-dnb)
+lpdnb_platform(lp-tenori)
 
 # Make "Start" in Visual Studio run lp-dnb instead of ALL_BUILD.
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT lp-dnb)
 
 # Offline self-test of the engine and file formats (no audio device or MIDI needed).
-add_executable(lp-dnb-tests tests/selftest.cpp src/styles.cpp src/storage.cpp src/sample.cpp src/engine.cpp)
+add_executable(lp-dnb-tests tests/selftest.cpp src/styles.cpp src/storage.cpp src/sample.cpp src/engine.cpp
+  src/tenori.cpp src/controller.cpp)
 target_include_directories(lp-dnb-tests PRIVATE src)
 if(WIN32)
   target_compile_definitions(lp-dnb-tests PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)

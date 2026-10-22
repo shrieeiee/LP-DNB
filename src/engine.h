@@ -13,6 +13,9 @@ public:
     ~Engine();
     // Render `frames` stereo frames, interleaved L/R.
     void process(float* out, int frames);
+    // Same, with the block's start time given instead of read from the clock
+    // (offline rendering on a virtual timeline, matching the Cmd::t stamps).
+    void process(float* out, int frames, double now);
 
 private:
     struct Impl;

@@ -13,6 +13,9 @@ saved between sessions. A second MIDI keyboard can play a lead synth over the to
 sounds, and you can record what you play into the pattern. Record the output to WAV, export patterns as
 MIDI files, and sync to other gear with MIDI clock.
 
+There's also a second program, **lp-tenori**: a Tenori-on style sequencer that plays the same sound engine
+from the Launchpad (see [below](#lp-tenori-a-tenori-on-on-the-launchpad)).
+
 ## The sound engine
 
 - **Stereo throughout**, with hats, percussion and toms placed across the field, wide unison chords and
@@ -163,6 +166,8 @@ then Open Project and build the `Release` configuration in Visual Studio.
 
 **macOS / Linux** build a console version (same synth, lights and hot-plugging, no window).
 
+Every platform also builds `lp-tenori` (the Tenori-on style sequencer) next to `lp-dnb`.
+
 **macOS**
 
 ```
@@ -185,8 +190,9 @@ Console options: `--list` (show MIDI ports), `--style N` (start in style N), `--
 and print their levels, limiter activity and CPU use; no hardware needed for either).
 
 `lp-dnb-tests` (built alongside) checks the engine offline: WAV loading in every format, kit-folder matching,
-sample-accurate timing, sampled drums, the limiter ceiling, stereo output, long patterns and song mode, and that
-the save file round-trips exactly.
+sample-accurate timing (including notes scheduled ahead), sampled drums, the limiter ceiling, stereo output, long
+patterns and song mode, that the save file round-trips exactly, and lp-tenori's Bounce / Score / Path timing,
+mutes and save file.
 
 ## Launchpad layout
 
@@ -240,6 +246,64 @@ the save file round-trips exactly.
   when it returns. Also: audio buffer size and exclusive mode, MIDI clock in/out, and the recordings folder.
 - **Computer keyboard**: Space = play/stop, Z X C V B N M , = drum row, 1–8 = notes,
   Q–I and A–K = hold effects (same order as the pads).
+
+## lp-tenori: a Tenori-on on the Launchpad
+
+`lp-tenori` is a separate program built alongside `lp-dnb`. It turns the Launchpad into a Tenori-on: light-up
+grid sequencing with **8 layers** playing at once, each with its own sound, way of playing, octave, loop length
+and volume. It uses LP-DNB's sound engine, so every style's drum kit, bass, chords, lead sounds, effects, mixer
+settings and sampled drums are all there. Every note sends a ripple of light out across the grid in its layer's
+colour.
+
+```
+ (Play) (Page) (BPM-) (BPM+) (Mode) (Sound) (Fx) (Shift)     <- round top buttons
+
+ [ ][ ][ ][ ][ ][ ][ ][ ]  (layer 1)
+ [ ][ ][ ][ ][ ][ ][ ][ ]  (layer 2)        the grid: the selected layer
+ ...                        ...             right column: pick a layer
+ [ ][ ][ ][ ][ ][ ][ ][ ]  (layer 8)
+```
+
+**Modes** (each layer has one; **Mode** steps through them):
+
+| Mode | How it plays |
+|---|---|
+| Score | Rows are notes (top = highest), columns are steps. Tap to toggle. Loops are 1-16 steps; **Page** flips between steps 1-8 and 9-16 (and by default the page follows the playhead). Each layer can have its own length, so layers drift against each other. |
+| Bounce | Tap a pad and a ball drops from it to the bottom row and back up, playing as it lands. The higher you tap, the slower it repeats, so balls at different heights make polyrhythms. Columns are notes. Tap the same pad to remove a ball. |
+| Path | Tap points and a light travels between them in the order you placed them, playing each one. The further apart two points are, the longer the gap, so the shape you draw is the rhythm. Tap a point again to remove it. |
+| Push | Hold pads to play them on repeat while held. Rows are notes, columns are how fast: from once a bar on the left to 1/64 notes on the right. |
+
+**Sounds** (**Sound** steps through them): **Drums** (rows are the style's kit, kick at the bottom, with its chord stab
+on the top row; in Bounce mode the columns are the kit), **Bass**, **Chords** (a chord on each scale degree) and
+**Lead** (the lead synth; pick its sound on the Shift page). Notes are always in the style's key.
+
+**Other buttons**
+
+- **Right column**: pick the layer to show and edit. Layers with something in them glow, and flash as they play.
+- **Fx** (hold): the bottom two rows become the style's 16 effects, as in lp-dnb. Hold an effect pad.
+- **Shift** (hold) shows the settings page:
+  - rows 1-2: **style** (sounds, key and tempo)
+  - row 3: this layer's **sound** (first four pads) and **mode** (last four)
+  - row 4: **octave** -2 to +2, then three switches: show the other layers' notes faintly, swing, page follows playhead
+  - rows 5-6: the **lead sound** (green = polyphonic, red = mono, amber = the style's chord sound)
+  - row 7: layer **volume**; row 8: Score **loop length** (tap a pad again for the odd length in between)
+  - Shift + right column: **mute** a layer (red = muted)
+  - Shift + **Mode**: clear this layer. Shift + **Play**: clear every layer. Shift + **Sound**: undo the clear (again to redo).
+  - Shift + **BPM-/BPM+**: tempo in steps of 5
+- When stopped, placing a note plays it so you can hear what you're adding.
+
+Your layers, style, tempo and lead sound are saved automatically to `lp-tenori.txt` next to LP-DNB's own
+save file, and lp-tenori leaves LP-DNB's patterns and settings alone. Other MIDI keyboards still play the lead
+sound over the top, and **Follow clock from** (set in lp-dnb) starts and stops it.
+
+Run it from the same build folder (`build\Release\lp-tenori.exe` on Windows, `./build/lp-tenori` elsewhere).
+It's a console program on every platform and shows what's selected on one status line. Options: `--list`,
+`--style N`, `--audio "device name"`, and `--demo [out.wav] [--style N] [--bars N]`, which renders a little
+scene using every mode offline (no hardware needed) and prints how many notes each sound played.
+
+Things to know: all Lead layers share the one lead synth (and its sound), so a mono lead sound plays one note at
+a time across them; the Bass is one monophonic synth too. MIDI clock *output* only follows lp-dnb's own sequencer,
+so it doesn't run in lp-tenori.
 
 ## Other MIDI controllers
 
@@ -304,4 +368,6 @@ pat("Two-step", {"x.........x.....",   // drums: x hit  X accent  o ghost  r 2-h
 - `assets/fonts/` – Nunito (SIL Open Font License), built into the program via `tools/embed_fonts.py`
 - `src/gui.cpp`, `src/main_win32.cpp` – the Windows window (Dear ImGui + Direct3D 11)
 - `src/main_console.cpp` – console front-end for macOS / Linux, plus the offline demo/test renderer
+- `src/tenori.cpp` – lp-tenori's sequencer: layers, modes, scheduling, Launchpad mapping, lights, save file
+- `src/main_tenori.cpp` – lp-tenori's console front-end and offline demo
 - `tests/selftest.cpp` – offline engine and file-format checks

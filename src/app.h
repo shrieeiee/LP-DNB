@@ -21,12 +21,30 @@ namespace dnb {
 class Engine;
 struct Sample;
 
+// Something other than the groovebox controller that drives the Launchpad
+// (lp-tenori's sequencer). While one is set, App sends it the Launchpad's
+// buttons and MIDI clock Start/Stop, and shows its lights.
+class Surface {
+public:
+    virtual ~Surface() = default;
+    virtual void onLaunchpad(const std::vector<unsigned char>& m, double now) = 0;
+    virtual void render(double now, Frame& out) = 0;
+    virtual void update(double /*now*/) {}
+    virtual void releaseAll(double /*now*/) {}
+    virtual void onClock(bool /*start*/) {}  // following another device's MIDI clock
+};
+
 class App {
 public:
     explicit App(bool nullAudio = false);
     ~App();
 
     void tick(double now);
+
+    // Hand the Launchpad to another surface (nullptr = back to the groovebox).
+    void setSurface(Surface* s) { surface_ = s; }
+    // Off: don't write the groovebox's save file (style, tempo... changed by another surface).
+    void setAutosave(bool on) { autosave_ = on; }
 
     Shared& shared() { return *sh_; }
     Controller& controller() { return *ctl_; }
@@ -143,6 +161,9 @@ private:
 
     std::unique_ptr<MidiClockOut> clock_;
     float clockBpm_ = 0.f;
+
+    Surface* surface_ = nullptr;
+    bool autosave_ = true;
 };
 
 }  // namespace dnb

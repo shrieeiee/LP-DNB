@@ -139,7 +139,7 @@ App::App(bool nullAudio)
 
 App::~App() {
     if (recording_) stopRecording();
-    saveNow();
+    if (autosave_) saveNow();
     clock_.reset();
     audioQuit_ = true;
     if (audioThread_.joinable()) audioThread_.join();
@@ -852,16 +852,22 @@ void App::virtualPress(int x, int y, bool down) {
     std::vector<unsigned char> m;
     if (y < 0) m = {0xB0, static_cast<unsigned char>(104 + x), static_cast<unsigned char>(down ? 127 : 0)};
     else m = {0x90, static_cast<unsigned char>(y * 16 + x), static_cast<unsigned char>(down ? 127 : 0)};
-    ctl_->onMidi(m, monotonicSec());
+    if (surface_) surface_->onLaunchpad(m, monotonicSec());
+    else ctl_->onMidi(m, monotonicSec());
 }
 
 void App::tick(double now) {
     uiPhase() = "handling MIDI input";
     for (auto& m : midi_->takeMessages()) {
-        if (m.source == MidiMsg::LAUNCHPAD) ctl_->onMidi(m.bytes, now);
-        else if (m.source == MidiMsg::CLOCK) {
+        if (m.source == MidiMsg::LAUNCHPAD) {
+            if (surface_) surface_->onLaunchpad(m.bytes, now);
+            else ctl_->onMidi(m.bytes, now);
+        } else if (m.source == MidiMsg::CLOCK) {
             const unsigned char b = m.bytes.empty() ? 0 : m.bytes[0];
-            if (b == 0xFA || (b == 0xFB && !sh_->playing.load())) sh_->send(Cmd::Play);
+            if (surface_) {
+                if (b == 0xFA || b == 0xFB) surface_->onClock(true);
+                else if (b == 0xFC) surface_->onClock(false);
+            } else if (b == 0xFA || (b == 0xFB && !sh_->playing.load())) sh_->send(Cmd::Play);
             else if (b == 0xFC && sh_->playing.load()) sh_->send(Cmd::Stop);
         } else handleKeyboard(m.bytes, m.route);
     }
@@ -877,7 +883,10 @@ void App::tick(double now) {
         else ++i;
     }
     uiPhase() = "scanning MIDI devices";
-    if (midi_->poll(now)) ctl_->releaseAll(now);
+    if (midi_->poll(now)) {
+        if (surface_) surface_->releaseAll(now);
+        else ctl_->releaseAll(now);
+    }
 
     size_t open = 0;
     for (const auto& k : midi_->keyboards()) open += k.open ? 1 : 0;
@@ -888,13 +897,15 @@ void App::tick(double now) {
     if (now >= nextSave_) {
         uiPhase() = "autosaving";
         nextSave_ = now + 2.0;
-        saveNow();
+        if (autosave_) saveNow();
     }
 
     uiPhase() = "updating Launchpad lights";
-    ctl_->update(now);
+    if (surface_) surface_->update(now);
+    else ctl_->update(now);
     if (now >= nextLed_) {
-        ctl_->render(now, frame_);
+        if (surface_) surface_->render(now, frame_);
+        else ctl_->render(now, frame_);
         midi_->pushFrame(frame_);
         nextLed_ += 1.0 / 30.0;
         if (nextLed_ < now) nextLed_ = now + 1.0 / 30.0;

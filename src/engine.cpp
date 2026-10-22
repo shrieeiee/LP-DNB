@@ -627,6 +627,9 @@ struct Engine::Impl {
     MonoVoice bass;
     ChordVoice chords[3];
     int curChord = 0;
+    uint32_t chordGen[3] = {};  // bumps each time a chord voice is (re)used
+    uint32_t bassGen = 0;       // bumps on every bass note
+    uint32_t leadGen[128] = {}; // bumps on every lead note, per MIDI note
     LeadSynth lead;
     SirenVoice siren;
     RiserVoice riser;
@@ -660,6 +663,15 @@ struct Engine::Impl {
     struct Hit { uint64_t at; int slot; float vel, pitch, decay, tone; };
     Hit hits[96];
     int hitCount = 0;
+
+    // Releases for Cmd::Note: each one only lets go if no newer note took the voice.
+    struct Release { uint64_t at; int slot; int note; uint32_t gen; };
+    Release releases[256];
+    int releaseCount = 0;
+
+    // Commands stamped for a moment after this block: held back until their block.
+    Cmd later[512];
+    int laterCount = 0;
 
     // ---- buffer FX (stereo)
     bool fxHeld[FX_COUNT] = {};
@@ -784,6 +796,7 @@ struct Engine::Impl {
             f[i] = midiHz(static_cast<float>(st.root + st.chord.octave + degreeSemis(st, degree + 2 * i)) + semis);
         chords[curChord].noteOff();
         curChord = (curChord + 1) % 3;
+        ++chordGen[curChord];
         chords[curChord].noteOn(st.chord, f, n, vel, cutMul * std::pow(2.f, mix(kChordSlot).tone.load() * 2.f));
         hit(kChordSlot);
     }
@@ -793,6 +806,7 @@ struct Engine::Impl {
         const Style& st = style();
         const int tune = static_cast<int>(std::lround(mix(kBassSlot).tune.load()));
         bass.noteOn(st.bass, st.root + tune, semis, accent, slide, cutMul * std::pow(2.f, mix(kBassSlot).tone.load() * 2.f));
+        ++bassGen;
         hit(kBassSlot);
     }
     void liveBassOn(int semis) {
@@ -809,6 +823,58 @@ struct Engine::Impl {
             }
         if (liveCount > 0) bassOn(liveBass[liveCount - 1], false, true);
         else bass.noteOff();
+    }
+
+    // ------------------------------------------------- scheduled notes --
+    // Cmd::Note: one note on any sound, released after `gate` seconds. Used by
+    // lp-tenori, which runs its own sequencer and schedules notes slightly ahead.
+    void addRelease(double gateSec, int slot, int note, uint32_t gen) {
+        const uint64_t at = sampleCount + static_cast<uint64_t>(std::max(0.005, gateSec) * sr);
+        if (releaseCount < 256) {
+            releases[releaseCount++] = {at, slot, note, gen};
+            return;
+        }
+        // Full (hundreds of overlapping notes): let the oldest one go now to make room.
+        int oldest = 0;
+        for (int i = 1; i < releaseCount; ++i) if (releases[i].at < releases[oldest].at) oldest = i;
+        const Release r = releases[oldest];
+        releases[oldest] = {at, slot, note, gen};
+        release(r);
+    }
+    void release(const Release& r) {
+        if (r.slot == kChordSlot) {
+            if (r.note >= 0 && r.note < 3 && chordGen[r.note] == r.gen && liveChord == 0) chords[r.note].noteOff();
+        } else if (r.slot == kBassSlot) {
+            if (bassGen == r.gen && liveCount == 0 && !seqBassActive) bass.noteOff();
+        } else if (r.slot == kLeadSlot) {
+            if (r.note >= 0 && r.note < 128 && leadGen[r.note] == r.gen) lead.noteOff(r.note);
+        }
+    }
+    void playNote(int slot, int pitch, float vel, float gateSec) {
+        vel = clampf(vel, 0.f, 1.25f);
+        if (vel <= 0.f) return;
+        const double gate = gateSec > 0.f ? gateSec : samplesPerStep() / sr;
+        if (slot >= 0 && slot <= kExtraSlot) {
+            if (!audible(slot)) return;
+            triggerDrum(slot, vel * mix(slot).volume.load(std::memory_order_relaxed), static_cast<float>(pitch));
+        } else if (slot == kChordSlot) {
+            if (!audible(kChordSlot)) return;
+            chordOn(pitch, vel * mix(kChordSlot).volume.load(std::memory_order_relaxed));
+            addRelease(gate, kChordSlot, curChord, chordGen[curChord]);
+        } else if (slot == kBassSlot) {
+            if (!audible(kBassSlot) || liveCount > 0) return;  // a bass pad held live wins
+            seqBassActive = false;
+            bassOn(pitch, vel > 1.f, false);
+            bass.vel = std::min(1.f, vel) * mix(kBassSlot).volume.load(std::memory_order_relaxed);
+            addRelease(gate, kBassSlot, pitch, bassGen);
+        } else if (slot == kLeadSlot) {
+            if (!audible(kLeadSlot) || pitch < 0 || pitch > 127) return;
+            lead.noteOn(style(), pitch, std::max(1, std::min(127, static_cast<int>(std::lround(vel * 100.f)))));
+            ++leadGen[pitch];
+            sh.leadNote.store(pitch, std::memory_order_relaxed);
+            hit(kLeadSlot);
+            addRelease(gate, kLeadSlot, pitch, leadGen[pitch]);
+        }
     }
 
     // ------------------------------------------------------- sequencer --
@@ -962,6 +1028,16 @@ struct Engine::Impl {
 
     void sequencerTick() {
         beatPos += 1.0 / samplesPerBeat();
+        // Scheduled-note releases run whether or not the groovebox sequencer is playing.
+        for (int i = 0; i < releaseCount;) {
+            if (sampleCount >= releases[i].at) {
+                const Release r = releases[i];
+                releases[i] = releases[--releaseCount];
+                release(r);
+            } else {
+                ++i;
+            }
+        }
         if (!playing) return;
         beatsSincePlay += 1.0 / samplesPerBeat();
         phase += 1.0;
@@ -1146,7 +1222,14 @@ struct Engine::Impl {
             case Cmd::LeadSustain: lead.setSustain(c.a != 0); break;
             case Cmd::LeadBend: lead.bend = c.f; break;
             case Cmd::LeadMod: lead.mod = c.f; break;
-            case Cmd::LeadAllOff: lead.allOff(); lead.setSustain(false); break;
+            case Cmd::LeadAllOff:
+                lead.allOff();
+                lead.setSustain(false);
+                for (int i = 0; i < releaseCount;)  // scheduled lead releases have nothing left to do
+                    if (releases[i].slot == kLeadSlot) releases[i] = releases[--releaseCount];
+                    else ++i;
+                break;
+            case Cmd::Note: playNote(c.a, c.b, c.f, c.g); break;
             case Cmd::FxOn: fxOn(c.a); break;
             case Cmd::FxOff: fxOff(c.a); break;
             case Cmd::SetSample:
@@ -1195,24 +1278,36 @@ struct Engine::Impl {
     }
 
     // --------------------------------------------------------- render --
-    void process(float* out, int frames) {
+    void process(float* out, int frames, double now) {
         disableDenormals();
         const auto t0 = std::chrono::steady_clock::now();
-        const double now = monotonicSec();
         blockNow = now;
         curFrame = 0;
         const double blockSec = frames / static_cast<double>(sr);
 
         // Commands land at the sample matching when they were sent, one block
-        // later: constant latency instead of block-sized jitter.
+        // later: constant latency instead of block-sized jitter. Ones stamped for
+        // a moment after this block's start wait for their own block.
         Cmd cmds[256];
         int off[256];
         int nc = 0;
-        Cmd c;
-        while (nc < 256 && sh.cmds.pop(c)) {
+        auto take = [&](const Cmd& c) {
             const double o = (c.t + blockSec - now) * sr;
+            if (c.t > now && o >= frames && laterCount < 512) return false;  // not this block yet
             off[nc] = std::max(0, std::min(frames - 1, static_cast<int>(o)));
             cmds[nc++] = c;
+            return true;
+        };
+        {
+            int keep = 0;
+            for (int i = 0; i < laterCount; ++i) {
+                if (nc >= 256 || !take(later[i])) later[keep++] = later[i];
+            }
+            laterCount = keep;
+        }
+        Cmd c;
+        while (nc < 256 && sh.cmds.pop(c)) {
+            if (!take(c)) later[laterCount++] = c;
         }
         for (int i = 1; i < nc; ++i)  // stable insertion sort by offset
             for (int j = i; j > 0 && off[j] < off[j - 1]; --j) {
@@ -1463,6 +1558,7 @@ struct Engine::Impl {
 
 Engine::Engine(Shared& shared, float sampleRate) : impl_(std::make_unique<Impl>(shared, sampleRate)) {}
 Engine::~Engine() = default;
-void Engine::process(float* out, int frames) { impl_->process(out, frames); }
+void Engine::process(float* out, int frames) { impl_->process(out, frames, monotonicSec()); }
+void Engine::process(float* out, int frames, double now) { impl_->process(out, frames, now); }
 
 }  // namespace dnb
