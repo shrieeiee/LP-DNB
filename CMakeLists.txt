@@ -93,9 +93,26 @@ if(NOT WIN32 AND NOT APPLE)
   endif()
 endif()
 
+# The git commit a build came from, shown in freeze logs ("dev" outside a git checkout).
+set(LPDNB_COMMIT "dev" CACHE STRING "Commit the program is built from (worked out from git if left as dev)")
+if(LPDNB_COMMIT STREQUAL "dev")
+  find_package(Git QUIET)
+  if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE _commit OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE _rc)
+    if(_rc EQUAL 0 AND _commit)
+      set(LPDNB_COMMIT_USED ${_commit})
+    endif()
+  endif()
+endif()
+if(NOT LPDNB_COMMIT_USED)
+  set(LPDNB_COMMIT_USED ${LPDNB_COMMIT})
+endif()
+
 # MIDI, audio and compiler settings shared by both programs.
 function(lpdnb_platform target)
   target_include_directories(${target} PRIVATE src ${rtmidi_SOURCE_DIR} ${miniaudio_SOURCE_DIR})
+  target_compile_definitions(${target} PRIVATE LPDNB_COMMIT="${LPDNB_COMMIT_USED}")
   # Keep MIDI port names stable when devices are plugged in/out (no index suffix).
   target_compile_definitions(${target} PRIVATE RTMIDI_DO_NOT_ENSURE_UNIQUE_PORTNAMES)
   if(WIN32)
@@ -113,7 +130,9 @@ function(lpdnb_platform target)
     target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
   endif()
   if(MSVC)
-    target_compile_options(${target} PRIVATE /W3 /O2 /fp:fast)
+    target_compile_options(${target} PRIVATE /W3 /O2 /fp:fast /Zi)
+    # Keep a .pdb (matched to the .exe) so freeze-log call stacks can be read.
+    target_link_options(${target} PRIVATE /DEBUG /OPT:REF /OPT:ICF)
   else()
     target_compile_options(${target} PRIVATE -Wall -Wextra -O2)
   endif()

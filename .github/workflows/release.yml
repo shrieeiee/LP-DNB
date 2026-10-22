@@ -1,0 +1,60 @@
+# Builds the Windows programs, runs the self-tests and publishes a GitHub release
+# with LP-DNB-windows.zip whenever a version tag (v1.2.3) is pushed:
+#   git tag v1.3.1 && git push origin v1.3.1
+# The release text comes from packaging/release-notes.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:  # build the zip by hand (no release), from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          cmake -S . -B build -A x64
+          cmake --build build --config Release --parallel
+
+      - name: Self-test
+        working-directory: build
+        run: .\Release\lp-dnb-tests.exe
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $commit = (git rev-parse --short HEAD).Trim()
+          $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart('v') } else { "dev" }
+          New-Item -ItemType Directory -Force LP-DNB-windows | Out-Null
+          Copy-Item build\Release\lp-dnb.exe, build\Release\lp-tenori.exe, THIRD-PARTY-NOTICES.txt, LICENSE LP-DNB-windows\
+          (Get-Content packaging\READ-ME.txt -Raw).Replace('VERSION', $version).Replace('COMMIT', $commit) |
+            Set-Content -NoNewline LP-DNB-windows\READ-ME.txt
+          Compress-Archive -Path LP-DNB-windows -DestinationPath LP-DNB-windows.zip -Force
+          New-Item -ItemType Directory -Force LP-DNB-windows-symbols | Out-Null
+          Copy-Item build\Release\lp-dnb.pdb, build\Release\lp-tenori.pdb LP-DNB-windows-symbols\
+          Compress-Archive -Path LP-DNB-windows-symbols -DestinationPath LP-DNB-windows-symbols.zip -Force
+          (Get-Content packaging\release-notes.md -Raw).Replace('COMMIT', $commit) | Set-Content -NoNewline release-notes.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LP-DNB-windows
+          path: |
+            LP-DNB-windows.zip
+            LP-DNB-windows-symbols.zip
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: LP-DNB ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            LP-DNB-windows.zip
+            LP-DNB-windows-symbols.zip

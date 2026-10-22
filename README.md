@@ -45,6 +45,10 @@ Launchpad remaps itself: a drum kit, a bass in the style's key, chord stabs, and
 unzip it anywhere and double-click `lp-dnb.exe` (or `lp-tenori.exe`). Nothing to install. The programs aren't
 signed, so the first time Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
 
+Releases are built by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)) whenever a
+version tag is pushed (`git tag v1.3.1 && git push origin v1.3.1`), using `packaging/release-notes.md` as the
+release text.
+
 Or build it yourself with the steps under [Build](#build) (Visual Studio 2019/2022 and CMake). Keep
 `THIRD-PARTY-NOTICES.txt` with the programs if you pass them on.
 
